@@ -577,10 +577,10 @@ export default function InteractiveRoomScene({
   return (
     <div className="space-y-4">
       {/* Streetlight Illumination Control Header Bar (ABOVE 3D Render) */}
-      <div className="bg-slate-900/90 backdrop-blur-md border border-amber-500/50 p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center space-x-3 flex-1 min-w-[260px]">
-          <div className="p-2.5 bg-amber-500/10 rounded-xl text-amber-400">
-            <Lightbulb className="w-6 h-6 animate-pulse" />
+      <div className="bg-slate-900/90 backdrop-blur-md border border-amber-500/50 p-3 sm:p-4 rounded-2xl shadow-xl flex flex-wrap items-center justify-between gap-3 sm:gap-4">
+        <div className="flex items-center space-x-3 flex-1 min-w-[240px]">
+          <div className="p-2 sm:p-2.5 bg-amber-500/10 rounded-xl text-amber-400">
+            <Lightbulb className="w-5 h-5 sm:w-6 sm:h-6 animate-pulse" />
           </div>
           <div className="flex-1 space-y-1">
             <div className="flex justify-between text-xs font-bold text-slate-200">
@@ -596,18 +596,18 @@ export default function InteractiveRoomScene({
                 if (onToggleManualOverride) onToggleManualOverride(true);
                 if (onBrightnessChange) onBrightnessChange(Number(e.target.value));
               }}
-              className="w-full accent-amber-400 cursor-pointer h-2 bg-slate-800 rounded-lg"
+              className="w-full accent-amber-400 cursor-pointer h-2 bg-slate-800 rounded-lg touch-none"
             />
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 w-full sm:w-auto justify-end">
           <button
             onClick={() => {
               if (onToggleManualOverride) onToggleManualOverride(true);
               if (onBrightnessChange) onBrightnessChange(0);
             }}
-            className="px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-400 border border-slate-700 rounded-xl text-xs font-bold transition-all"
+            className="flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 bg-slate-950 hover:bg-slate-800 text-slate-400 border border-slate-700 rounded-xl text-xs font-bold transition-all active:scale-95"
           >
             OFF (0%)
           </button>
@@ -616,7 +616,7 @@ export default function InteractiveRoomScene({
               if (onToggleManualOverride) onToggleManualOverride(true);
               if (onBrightnessChange) onBrightnessChange(30);
             }}
-            className="px-3 py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800 rounded-xl text-xs font-bold transition-all"
+            className="flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 bg-amber-950/80 hover:bg-amber-900 text-amber-300 border border-amber-800 rounded-xl text-xs font-bold transition-all active:scale-95"
           >
             DIM (30%)
           </button>
@@ -625,7 +625,7 @@ export default function InteractiveRoomScene({
               if (onToggleManualOverride) onToggleManualOverride(true);
               if (onBrightnessChange) onBrightnessChange(70);
             }}
-            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md"
+            className="flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95"
           >
             MED (70%)
           </button>
@@ -634,7 +634,7 @@ export default function InteractiveRoomScene({
               if (onToggleManualOverride) onToggleManualOverride(true);
               if (onBrightnessChange) onBrightnessChange(100);
             }}
-            className="px-3 py-1.5 bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-lg"
+            className="flex-1 sm:flex-none px-2.5 sm:px-3 py-1.5 bg-gradient-to-r from-amber-400 to-yellow-300 text-slate-950 rounded-xl text-xs font-extrabold transition-all shadow-lg active:scale-95"
           >
             MAX (100%)
           </button>
@@ -642,15 +642,15 @@ export default function InteractiveRoomScene({
       </div>
 
       {/* Clean Unobstructed 3D WebGL Footpath Viewport */}
-      <div className="relative w-full h-[460px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 select-none group">
+      <div className="relative w-full h-[340px] sm:h-[450px] lg:h-[540px] rounded-2xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-950 select-none group touch-pan-y">
         <div ref={mountRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
         {/* Top Right Time Controls */}
         {onHourChange && (
-          <div className="absolute top-4 right-4 z-20 flex items-center space-x-1 bg-slate-950/85 p-1.5 rounded-full border border-slate-800 shadow-xl backdrop-blur-md">
+          <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20 flex items-center space-x-1 bg-slate-950/85 p-1 sm:p-1.5 rounded-full border border-slate-800 shadow-xl backdrop-blur-md max-w-full overflow-x-auto">
             <button
               onClick={() => onHourChange(6)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+              className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold transition-all ${
                 hour === 6 ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -658,7 +658,7 @@ export default function InteractiveRoomScene({
             </button>
             <button
               onClick={() => onHourChange(12)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+              className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold transition-all ${
                 hour === 12 ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -666,7 +666,7 @@ export default function InteractiveRoomScene({
             </button>
             <button
               onClick={() => onHourChange(18)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+              className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold transition-all ${
                 hour === 18 ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -674,7 +674,7 @@ export default function InteractiveRoomScene({
             </button>
             <button
               onClick={() => onHourChange(0)}
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+              className={`px-2.5 sm:px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold transition-all ${
                 hour === 0 ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -683,6 +683,7 @@ export default function InteractiveRoomScene({
           </div>
         )}
       </div>
+
     </div>
   );
 }
