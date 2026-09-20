@@ -9,7 +9,7 @@ class CloudSyncManager {
   constructor() {
     this.socket = null;
     this.connected = false;
-    this.serverUrl = import.meta.env.VITE_CLOUD_SERVER_URL || 'http://localhost:3001';
+    this.serverUrl = import.meta.env.VITE_CLOUD_SERVER_URL || 'https://piezogrid-cloud-backend.onrender.com';
     this.statusListeners = [];
   }
 
