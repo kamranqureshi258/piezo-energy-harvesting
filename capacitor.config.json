@@ -1,0 +1,9 @@
+{
+  "appId": "com.piezogrid.app",
+  "appName": "PiezoGrid EcoControl",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}
