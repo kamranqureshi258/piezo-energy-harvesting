@@ -8,6 +8,7 @@ export class ArduinoSerialHandler {
     this.port = null;
     this.reader = null;
     this.writer = null;
+    this.writeQueue = Promise.resolve();
     this.keepReading = false;
     this.connected = false;
 
@@ -21,7 +22,7 @@ export class ArduinoSerialHandler {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
   }
 
-  async connect(baudRate = 115200) {
+  async connect(baudRate = 9600) {
     if (!ArduinoSerialHandler.isSupported()) {
       throw new Error("Web Serial API is not supported in this browser. Please use Google Chrome, MS Edge, or Opera.");
     }
@@ -29,6 +30,7 @@ export class ArduinoSerialHandler {
     try {
       this.port = await navigator.serial.requestPort();
       await this.port.open({ baudRate: Number(baudRate) });
+      this.writer = this.port.writable.getWriter();
 
       this.connected = true;
       this.keepReading = true;
@@ -92,6 +94,7 @@ export class ArduinoSerialHandler {
           vCap: parsed.vcap ?? parsed.VCAP ?? 0,
           pulse: parsed.pulse ?? parsed.PULSE ?? 0,
           lux: parsed.lux ?? parsed.LUX ?? 50,
+          ledOn: parsed.led !== undefined ? Boolean(parsed.led) : null,
           raw: rawLine,
         });
         return;
@@ -135,17 +138,15 @@ export class ArduinoSerialHandler {
     }
   }
 
-  async sendCommand(commandStr) {
-    if (!this.port || !this.port.writable || !this.connected) return;
-    try {
-      const textEncoder = new TextEncoderStream();
-      const writableStreamClosed = textEncoder.readable.pipeTo(this.port.writable);
-      const writer = textEncoder.writable.getWriter();
-      await writer.write(commandStr + '\n');
-      writer.releaseLock();
-    } catch (err) {
-      console.error("Failed to send command:", err);
-    }
+  // Writes share one writer and are queued; piping a new stream into
+  // port.writable per command locks it and silently drops later commands.
+  sendCommand(commandStr) {
+    if (!this.writer || !this.connected) return Promise.resolve();
+    const data = new TextEncoder().encode(commandStr + '\n');
+    this.writeQueue = this.writeQueue
+      .then(() => this.writer && this.writer.write(data))
+      .catch((err) => console.error("Failed to send command:", err));
+    return this.writeQueue;
   }
 
   async disconnect() {
@@ -154,6 +155,12 @@ export class ArduinoSerialHandler {
       try {
         await this.reader.cancel();
       } catch (e) {}
+    }
+    if (this.writer) {
+      try {
+        this.writer.releaseLock();
+      } catch (e) {}
+      this.writer = null;
     }
     if (this.port) {
       try {

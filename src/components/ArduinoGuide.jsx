@@ -1,85 +1,10 @@
 import React, { useState } from 'react';
+import arduinoCode from '../../arduino/piezo_energy_harvesting.ino?raw';
 import { Cpu, Code2, Copy, Check, FileText, CircuitBoard, Layers } from 'lucide-react';
 
 export default function ArduinoGuide() {
   const [copied, setCopied] = useState(false);
 
-  const arduinoCode = `/*
-  =============================================================================
-  Piezoelectric Energy Harvesting & Smart Light Control - Arduino Sketch
-  =============================================================================
-  Hardware Setup:
-    1. Piezoelectric Sensors connected in parallel via Rectifier Diode Bridge
-       to an Energy Storage Capacitor (e.g., 4700uF 16V or Supercapacitor 5.5V).
-    2. Analog Pin A0: Voltage Divider reading Capacitor Voltage (V_cap).
-    3. Analog Pin A1: Piezo Instantaneous Impulse Sensor (for step detection).
-    4. Analog Pin A2: LDR Ambient Light Sensor.
-    5. Digital Pin 9 (PWM): Output to N-Channel MOSFET (IRF540N) controlling LED.
-  =============================================================================
-*/
-
-const int PIN_CAP_VOLTAGE  = A0; // Capacitor voltage divider pin
-const int PIN_PIEZO_IMPULSE= A1; // Piezo pulse detector pin
-const int PIN_LDR_LIGHT    = A2; // Ambient Light Sensor (LDR)
-const int PIN_LED_PWM      = 9;  // PWM Light output pin (0 - 255)
-
-const float VREF = 5.0;            // ADC Reference Voltage
-const float VOLTAGE_DIVIDER_RATIO = 2.0; // R1=10k, R2=10k
-const int PIEZO_THRESHOLD = 150;   // ADC threshold for footstep edge
-
-unsigned long footstepCount = 0;
-bool lastStepState = false;
-unsigned long lastSendTime = 0;
-const unsigned long SEND_INTERVAL = 200; // 200ms telemetry interval
-
-void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_LED_PWM, OUTPUT);
-  analogWrite(PIN_LED_PWM, 0);
-}
-
-void loop() {
-  int rawCapVoltage = analogRead(PIN_CAP_VOLTAGE);
-  int rawPiezoPulse = analogRead(PIN_PIEZO_IMPULSE);
-  int rawLdrLux     = analogRead(PIN_LDR_LIGHT);
-
-  float capVoltage = (rawCapVoltage / 1023.0) * VREF * VOLTAGE_DIVIDER_RATIO;
-  int ambientLuxPct = map(rawLdrLux, 0, 1023, 0, 100);
-
-  bool isStepping = (rawPiezoPulse > PIEZO_THRESHOLD);
-  if (isStepping && !lastStepState) {
-    footstepCount++;
-  }
-  lastStepState = isStepping;
-
-  // Listen for PWM brightness commands from Web App
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\\n');
-    input.trim();
-    if (input.startsWith("PWM:")) {
-      int pwmVal = input.substring(4).toInt();
-      pwmVal = constrain(pwmVal, 0, 255);
-      analogWrite(PIN_LED_PWM, pwmVal);
-    }
-  }
-
-  // Telemetry stream out
-  unsigned long now = millis();
-  if (now - lastSendTime >= SEND_INTERVAL) {
-    lastSendTime = now;
-    float pulseVolt = (rawPiezoPulse / 1023.0) * VREF;
-
-    Serial.print("{\\"steps\\":");
-    Serial.print(footstepCount);
-    Serial.print(",\\"vcap\\":");
-    Serial.print(capVoltage, 2);
-    Serial.print(",\\"pulse\\":");
-    Serial.print(pulseVolt, 2);
-    Serial.print(",\\"lux\\":");
-    Serial.print(ambientLuxPct);
-    Serial.println("}");
-  }
-}`;
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(arduinoCode);
@@ -123,16 +48,16 @@ void loop() {
               <span className="text-cyan-300 font-mono">4700µF 16V / 5.5V SuperCap</span>
             </li>
             <li className="flex justify-between border-b border-slate-800/60 pb-1">
-              <span className="font-semibold text-slate-400">Voltage Divider Resistors:</span>
-              <span className="text-cyan-300 font-mono">10kΩ + 10kΩ (Pin A0)</span>
+              <span className="font-semibold text-slate-400">PIR Motion Sensor:</span>
+              <span className="text-cyan-300 font-mono">Pin D2</span>
             </li>
             <li className="flex justify-between border-b border-slate-800/60 pb-1">
               <span className="font-semibold text-slate-400">LDR Light Sensor:</span>
-              <span className="text-purple-300 font-mono">Pin A2 (with 10k resistor)</span>
+              <span className="text-purple-300 font-mono">Pin A0 (with 10k resistor)</span>
             </li>
             <li className="flex justify-between pb-1">
               <span className="font-semibold text-slate-400">LED Driver MOSFET:</span>
-              <span className="text-emerald-300 font-mono">IRF540N (Pin D9 PWM)</span>
+              <span className="text-emerald-300 font-mono">IRF540N / LED (Pin D3)</span>
             </li>
           </ul>
         </div>
@@ -147,19 +72,19 @@ void loop() {
           <div className="space-y-2 text-xs">
             <div className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between items-center">
               <span className="font-mono text-amber-400 font-bold">Analog A0</span>
-              <span className="text-slate-300">Capacitor Voltage Divider</span>
+              <span className="text-slate-300">LDR Ambient Light Sensor</span>
             </div>
             <div className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between items-center">
               <span className="font-mono text-cyan-400 font-bold">Analog A1</span>
               <span className="text-slate-300">Piezo Impulse Sensor (Step Edge)</span>
             </div>
             <div className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between items-center">
-              <span className="font-mono text-purple-400 font-bold">Analog A2</span>
-              <span className="text-slate-300">LDR Ambient Light Sensor</span>
+              <span className="font-mono text-purple-400 font-bold">Digital D2</span>
+              <span className="text-slate-300">PIR Motion Sensor</span>
             </div>
             <div className="p-2 bg-slate-900 rounded border border-slate-800 flex justify-between items-center">
-              <span className="font-mono text-emerald-400 font-bold">Digital D9 (PWM)</span>
-              <span className="text-slate-300">MOSFET LED Brightness Control</span>
+              <span className="font-mono text-emerald-400 font-bold">Digital D3</span>
+              <span className="text-slate-300">Streetlight LED (web ON / OFF)</span>
             </div>
           </div>
         </div>
