@@ -66,12 +66,25 @@ void loop() {
   // 2. Read Motion Sensor (PIR)
   int motionDetected = digitalRead(PIR_PIN);
 
-  // 3. Smart Streetlight Logic
-  if (isNight && motionDetected == HIGH) {
+  // 3. Smart Streetlight Logic (Sensor Auto Mode + Web Command Override)
+  bool webOverrideOn = false;
+  if (Serial.available() > 0) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
+    if (input.startsWith("PWM:")) {
+      int pwmVal = input.substring(4).toInt();
+      if (pwmVal > 0) webOverrideOn = true;
+    } else if (input.equalsIgnoreCase("LIGHT:ON")) {
+      webOverrideOn = true;
+    }
+  }
+
+  if ((isNight && motionDetected == HIGH) || webOverrideOn) {
     digitalWrite(STREETLIGHT_PIN, HIGH);
   } else {
     digitalWrite(STREETLIGHT_PIN, LOW);
   }
+
 
   // 4. Physical Piezo Energy Harvesting (Ultra-Sensitive Delta)
   int rawPiezo = analogRead(PIEZO_PIN);
