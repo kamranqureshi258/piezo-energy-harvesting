@@ -1,85 +1,137 @@
 /*
   =============================================================================
-  Piezoelectric Energy Harvesting & Smart Light Control - Arduino Sketch
+  PiezoGrid EcoControl Pro - OLED + Motion Sensor + Piezo Energy Harvesting
   =============================================================================
   Hardware Setup:
-    1. Piezoelectric Sensors connected in parallel via Rectifier Diode Bridge
-       to a Energy Storage Capacitor (e.g., 1000uF - 4700uF or Supercapacitor 5.5V).
-    2. Analog Pin A0: Voltage Divider reading Capacitor Voltage (V_cap).
-    3. Analog Pin A1: Piezo Instantaneous Impulse Sensor (for step detection).
-    4. Analog Pin A2: LDR Ambient Light Sensor.
-    5. Digital Pin 9 (PWM): Output to Transistor / MOSFET / Relay controlling LED.
+    - OLED Display: 128x64 SSD1306 (I2C Address 0x3C: SDA, SCL)
+    - LDR Sensor: Analog Pin A0
+    - Piezo Sensor: Analog Pin A1
+    - PIR Motion Sensor: Digital Pin 2
+    - Streetlight Relay / LED: Digital Pin 3
   =============================================================================
 */
 
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
 // Pin Definitions
-const int PIN_CAP_VOLTAGE  = A0; // Capacitor voltage divider pin
-const int PIN_PIEZO_IMPULSE= A1; // Piezo pulse detector pin
-const int PIN_LDR_LIGHT    = A2; // Ambient Light Sensor (LDR)
-const int PIN_LED_PWM      = 9;  // PWM Light output pin (0 - 255)
+#define LDR_PIN A0
+#define PIEZO_PIN A1
+#define PIR_PIN 2
+#define STREETLIGHT_PIN 3
 
-// Circuit Constants
-const float VREF = 5.0;            // ADC Reference Voltage
-const float VOLTAGE_DIVIDER_RATIO = 2.0; // Divider ratio (R1=10k, R2=10k -> ratio 2.0 for up to 10V)
-const int PIEZO_THRESHOLD = 150;   // ADC threshold for counting a footstep pulse
-
-// State Variables
-unsigned long footstepCount = 0;
-bool lastStepState = false;
-unsigned long lastSendTime = 0;
-const unsigned long SEND_INTERVAL = 200; // Send serial telemetry every 200ms
+// System Variables
+int stepCount = 0;
+float totalVoltage = 0.0;
+float previousVoltage = 0.0; 
+unsigned long lastSerialTime = 0;
 
 void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_LED_PWM, OUTPUT);
-  analogWrite(PIN_LED_PWM, 0); // Start off
+  Serial.begin(9600);
+  pinMode(PIR_PIN, INPUT);
+  pinMode(STREETLIGHT_PIN, OUTPUT);
+
+  // Start OLED
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("OLED FAILED TO BOOT!");
+    for (;;); 
+  }
+
+  // Boot Screen
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  display.setTextSize(1);
+  display.setCursor(10, 20);
+  display.println("PROTOTYPE BOOTING...");
+  display.setCursor(10, 35);
+  display.println("PiezoGrid System");
+  display.display();
+  delay(2000);
+
+  // SYNC BASELINE: Read residual charge to prevent phantom initial step
+  int initialRead = analogRead(PIEZO_PIN);
+  previousVoltage = (initialRead / 1023.0) * 5.0;
 }
 
 void loop() {
-  // Read Sensors
-  int rawCapVoltage = analogRead(PIN_CAP_VOLTAGE);
-  int rawPiezoPulse = analogRead(PIN_PIEZO_IMPULSE);
-  int rawLdrLux     = analogRead(PIN_LDR_LIGHT);
+  // 1. Read Ambient Light (LDR)
+  int ldrValue = analogRead(LDR_PIN);
+  bool isNight = (ldrValue < 500); 
 
-  // Calculate actual capacitor voltage
-  float capVoltage = (rawCapVoltage / 1023.0) * VREF * VOLTAGE_DIVIDER_RATIO;
+  // 2. Read Motion Sensor (PIR)
+  int motionDetected = digitalRead(PIR_PIN);
+
+  // 3. Smart Streetlight Logic
+  if (isNight && motionDetected == HIGH) {
+    digitalWrite(STREETLIGHT_PIN, HIGH);
+  } else {
+    digitalWrite(STREETLIGHT_PIN, LOW);
+  }
+
+  // 4. Physical Piezo Energy Harvesting (Ultra-Sensitive Delta)
+  int rawPiezo = analogRead(PIEZO_PIN);
+  float currentVoltage = (rawPiezo / 1023.0) * 5.0; 
+
+  // Lowered threshold to 0.01V to catch single taps on 1000uF capacitor
+  if ((currentVoltage - previousVoltage) >= 0.01) { 
+    stepCount++;
+    totalVoltage += (currentVoltage - previousVoltage); // Add newly harvested amount
+    delay(250); // Prevent double-counting same vibration
+  } 
   
-  // Calculate Ambient Brightness percentage (0-100%)
-  int ambientLuxPct = map(rawLdrLux, 0, 1023, 0, 100);
+  // Constantly update baseline
+  previousVoltage = currentVoltage; 
 
-  // Detect Footstep Edge
-  bool isStepping = (rawPiezoPulse > PIEZO_THRESHOLD);
-  if (isStepping && !lastStepState) {
-    footstepCount++;
+  // 5. Update OLED Interface
+  display.clearDisplay();
+  
+  // Status Line
+  display.setCursor(0, 0);
+  display.print("STATUS: ");
+  display.println(isNight ? "NIGHT" : "DAY");
+  
+  // Steps Line
+  display.setCursor(0, 15);
+  display.print("Steps:  ");
+  display.println(stepCount);
+  
+  // Harvested Line
+  display.setCursor(0, 30);
+  display.print("Harvested: ");
+  display.print(totalVoltage, 2);
+  display.println(" V");
+  
+  // Streetlight Line
+  display.setCursor(0, 45);
+  display.print("Streetlight: ");
+  if (digitalRead(STREETLIGHT_PIN) == HIGH) {
+    display.println("ON");
+  } else {
+    display.println("OFF");
   }
-  lastStepState = isStepping;
+  
+  display.display();
 
-  // Process incoming Serial commands from Web App (e.g. "PWM:180" or "MODE:AUTO")
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.startsWith("PWM:")) {
-      int pwmVal = input.substring(4).toInt();
-      pwmVal = constrain(pwmVal, 0, 255);
-      analogWrite(PIN_LED_PWM, pwmVal);
-    }
-  }
-
-  // Send Telemetry to Web App periodically
+  // 6. Serial Telemetry Stream for Web Application & Global Cloud Sync
   unsigned long now = millis();
-  if (now - lastSendTime >= SEND_INTERVAL) {
-    lastSendTime = now;
-
-    // Send formatted JSON line
-    // Format: {"steps":12,"vcap":3.82,"pulse":0.45,"lux":68}
-    float pulseVolt = (rawPiezoPulse / 1023.0) * VREF;
+  if (now - lastSerialTime >= 200) {
+    lastSerialTime = now;
     
+    int ambientLuxPct = map(ldrValue, 0, 1023, 100, 0);
+    if (ambientLuxPct < 0) ambientLuxPct = 0;
+    if (ambientLuxPct > 100) ambientLuxPct = 100;
+
     Serial.print("{\"steps\":");
-    Serial.print(footstepCount);
+    Serial.print(stepCount);
     Serial.print(",\"vcap\":");
-    Serial.print(capVoltage, 2);
+    Serial.print(totalVoltage, 2);
     Serial.print(",\"pulse\":");
-    Serial.print(pulseVolt, 2);
+    Serial.print(currentVoltage, 2);
     Serial.print(",\"lux\":");
     Serial.print(ambientLuxPct);
     Serial.println("}");
