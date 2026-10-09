@@ -254,7 +254,12 @@ export default function App() {
 
     setManualOverride(true);
     setManualBrightness(isCurrentlyOn ? 0 : 100);
-    setLightCommand(isCurrentlyOn ? 'OFF' : 'ON');
+    const nextCommand = isCurrentlyOn ? 'OFF' : 'ON';
+    setLightCommand(nextCommand);
+    // Effect won't refire if state is unchanged (e.g. hardware drifted from app state), so resend.
+    if (nextCommand === lightCommand && isConnected && hwReady && serialHandlerRef.current) {
+      serialHandlerRef.current.sendCommand(`LIGHT:${nextCommand}`);
+    }
 
     cloudSync.sendRemoteControl(`PWM:${targetPWM}`);
   };
