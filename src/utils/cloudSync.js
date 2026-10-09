@@ -11,6 +11,7 @@ class CloudSyncManager {
     this.connected = false;
     this.serverUrl = import.meta.env.VITE_CLOUD_SERVER_URL || 'https://piezogrid-cloud-backend.onrender.com';
     this.statusListeners = [];
+    this.hardwareListeners = [];
   }
 
   connect(customUrl) {
@@ -39,6 +40,10 @@ class CloudSyncManager {
       this.socket.on('connect_error', () => {
         this.connected = false;
         this.notifyStatus(false);
+      });
+
+      this.socket.on('hardware:pwm', (command) => {
+        this.hardwareListeners.forEach((cb) => cb(command));
       });
     } catch (e) {
       console.warn('Cloud sync connect error:', e);
@@ -71,6 +76,13 @@ class CloudSyncManager {
     if (this.socket && this.connected) {
       this.socket.emit('control:light', command);
     }
+  }
+
+  onHardwareCommand(callback) {
+    this.hardwareListeners.push(callback);
+    return () => {
+      this.hardwareListeners = this.hardwareListeners.filter((cb) => cb !== callback);
+    };
   }
 }
 

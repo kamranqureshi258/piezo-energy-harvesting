@@ -3,7 +3,7 @@ import { Usb, X, AlertCircle, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { ArduinoSerialHandler } from '../utils/serialHandler';
 
 export default function SerialConnectionModal({ isOpen, onClose, onConnect, error }) {
-  const [baudRate, setBaudRate] = useState('115200');
+  const [baudRate, setBaudRate] = useState('9600');
   const supported = ArduinoSerialHandler.isSupported();
 
   if (!isOpen) return null;
@@ -53,8 +53,8 @@ export default function SerialConnectionModal({ isOpen, onClose, onConnect, erro
                 onChange={(e) => setBaudRate(e.target.value)}
                 className="w-full bg-slate-950 text-emerald-300 border border-slate-700 rounded-xl px-3 py-2 text-sm font-mono font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
               >
-                <option value="115200">115200 baud (Recommended standard)</option>
-                <option value="9600">9600 baud</option>
+                <option value="9600">9600 baud (matches firmware)</option>
+                <option value="115200">115200 baud</option>
                 <option value="57600">57600 baud</option>
                 <option value="19200">19200 baud</option>
               </select>

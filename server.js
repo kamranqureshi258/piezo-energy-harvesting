@@ -74,7 +74,7 @@ io.on('connection', (socket) => {
   // Remote lighting command
   socket.on('control:light', (command) => {
     console.log('⚡ Remote Light Command:', command);
-    io.emit('hardware:pwm', command);
+    socket.broadcast.emit('hardware:pwm', command);
   });
 
   socket.on('disconnect', () => {

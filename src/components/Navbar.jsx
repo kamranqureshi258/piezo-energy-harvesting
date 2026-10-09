@@ -16,6 +16,7 @@ export default function Navbar({
   onToggleMute,
   isCloudConnected = true,
   onForceLightToggle,
+  lightOn = false,
 }) {
 
   return (
@@ -99,11 +100,15 @@ export default function Navbar({
           {onForceLightToggle && (
             <button
               onClick={() => onForceLightToggle()}
-              className="px-3 py-1.5 bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 rounded-lg text-xs font-extrabold transition-all shadow-md active:scale-95 flex items-center space-x-1.5 border border-amber-300 animate-pulse"
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shadow-md active:scale-95 flex items-center space-x-1.5 border ${
+                lightOn
+                  ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 border-amber-300'
+                  : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
+              }`}
               title="Force Turn ON/OFF Physical Pin 3 LED & 3D Streetlight"
             >
-              <Zap className="w-3.5 h-3.5 text-slate-950" />
-              <span>Light ON / OFF</span>
+              <Zap className={`w-3.5 h-3.5 ${lightOn ? 'text-slate-950' : 'text-slate-400'}`} />
+              <span>{lightOn ? 'Light ON' : 'Light OFF'}</span>
             </button>
           )}
 

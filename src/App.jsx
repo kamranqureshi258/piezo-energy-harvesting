@@ -54,6 +54,8 @@ export default function App() {
   // Handlers Refs
   const serialHandlerRef = useRef(null);
   const simulatorRef = useRef(null);
+  const lastSerialCommandRef = useRef('');
+  const lastArduinoNightRef = useRef(null);
 
   const handleToggleMute = () => {
     const nextMute = !isMuted;
@@ -89,6 +91,20 @@ export default function App() {
         setVCap(data.vCap);
         setPulse(data.pulse);
         setAmbientLux(data.lux);
+
+        if (data.night !== undefined && data.night !== null) {
+          const isNight = Number(data.night) === 1;
+          if (lastArduinoNightRef.current !== isNight) {
+            lastArduinoNightRef.current = isNight;
+            if (isNight) {
+              setHour(21);
+              setWeather('night');
+            } else {
+              setHour(12);
+              setWeather('sunny');
+            }
+          }
+        }
       },
       onConnect: () => {
         setIsConnected(true);
@@ -100,6 +116,8 @@ export default function App() {
       onDisconnect: () => {
         setIsConnected(false);
         setIsSimulator(true);
+        lastSerialCommandRef.current = '';
+        lastArduinoNightRef.current = null;
         aiVoice.speak("Arduino disconnected. Switching to simulator mode.");
         if (simulatorRef.current) simulatorRef.current.start();
       },
@@ -119,6 +137,32 @@ export default function App() {
     cloudSync.onStatusChange((status) => {
       setIsCloudConnected(status);
     });
+
+    const unsubscribeHardware = cloudSync.onHardwareCommand((command) => {
+      if (typeof command !== 'string') return;
+      if (serialHandlerRef.current?.connected) {
+        serialHandlerRef.current.sendCommand(command);
+      }
+      if (command.includes('LIGHT:ON') || /^PWM:([1-9]\d*)$/.test(command)) {
+        setManualOverride(true);
+        setManualBrightness(100);
+      } else if (command.includes('LIGHT:OFF') || command === 'PWM:0') {
+        setManualOverride(true);
+        setManualBrightness(0);
+      } else if (command.includes('LIGHT:AUTO')) {
+        setManualOverride(false);
+      } else if (command.includes('MODE:NIGHT') || command === 'NIGHT') {
+        setHour(21);
+        setWeather('night');
+      } else if (command.includes('MODE:DAY') || command === 'DAY') {
+        setHour(12);
+        setWeather('sunny');
+      }
+    });
+
+    return () => {
+      if (unsubscribeHardware) unsubscribeHardware();
+    };
   }, []);
 
   // Compute Smart Light Output
@@ -147,17 +191,24 @@ export default function App() {
   // Compute Energy Metrics
   const energyMetrics = calculateEnergyMetrics({ vCap, footsteps: steps });
 
-  // Send PWM command to Arduino & Simulator + Broadcast Telemetry to Cloud
+  // Send latched light commands to Arduino (only when the command changes)
   useEffect(() => {
-    if (isConnected && serialHandlerRef.current) {
-      serialHandlerRef.current.sendCommand(`PWM:${lightState.pwmValue}`);
+    const command = manualOverride
+      ? (lightState.pwmValue > 0 ? 'LIGHT:ON' : 'LIGHT:OFF')
+      : 'LIGHT:AUTO';
+
+    if (isConnected && serialHandlerRef.current && lastSerialCommandRef.current !== command) {
+      lastSerialCommandRef.current = command;
+      serialHandlerRef.current.sendCommand(command);
+      cloudSync.sendRemoteControl(command);
     }
 
     if (isSimulator && simulatorRef.current) {
       simulatorRef.current.tick(lightState.brightness);
     }
+  }, [manualOverride, lightState.pwmValue, lightState.brightness, isConnected, isSimulator]);
 
-    // Broadcast telemetry to global cloud backend
+  useEffect(() => {
     cloudSync.emitGatewayData({
       steps,
       vCap,
@@ -166,7 +217,7 @@ export default function App() {
       weather,
       brightness: lightState.brightness,
     });
-  }, [lightState.pwmValue, lightState.brightness, isConnected, isSimulator, steps, vCap, pulse, ambientLux, weather]);
+  }, [steps, vCap, pulse, ambientLux, weather, lightState.brightness]);
 
   // Update History Stream for Charts
   useEffect(() => {
@@ -232,18 +283,16 @@ export default function App() {
 
   const handleForceLightToggle = () => {
     const isCurrentlyOn = lightState.brightness > 0;
-    const targetBrightness = isCurrentlyOn ? 0 : 100;
-    const targetPWM = isCurrentlyOn ? 0 : 255;
+    const command = isCurrentlyOn ? 'LIGHT:OFF' : 'LIGHT:ON';
 
     setManualOverride(true);
-    setManualBrightness(targetBrightness);
+    setManualBrightness(isCurrentlyOn ? 0 : 100);
 
+    lastSerialCommandRef.current = command;
     if (isConnected && serialHandlerRef.current) {
-      serialHandlerRef.current.sendCommand(`PWM:${targetPWM}`);
-      serialHandlerRef.current.sendCommand(isCurrentlyOn ? "LIGHT:OFF" : "LIGHT:ON");
+      serialHandlerRef.current.sendCommand(command);
     }
-
-    cloudSync.sendRemoteControl(`PWM:${targetPWM}`);
+    cloudSync.sendRemoteControl(command);
   };
 
   return (
@@ -264,6 +313,7 @@ export default function App() {
         onToggleMute={handleToggleMute}
         isCloudConnected={isCloudConnected}
         onForceLightToggle={handleForceLightToggle}
+        lightOn={lightState.brightness > 0}
       />
 
 

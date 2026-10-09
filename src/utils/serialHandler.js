@@ -21,7 +21,7 @@ export class ArduinoSerialHandler {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
   }
 
-  async connect(baudRate = 115200) {
+  async connect(baudRate = 9600) {
     if (!ArduinoSerialHandler.isSupported()) {
       throw new Error("Web Serial API is not supported in this browser. Please use Google Chrome, MS Edge, or Opera.");
     }
@@ -92,6 +92,8 @@ export class ArduinoSerialHandler {
           vCap: parsed.vcap ?? parsed.VCAP ?? 0,
           pulse: parsed.pulse ?? parsed.PULSE ?? 0,
           lux: parsed.lux ?? parsed.LUX ?? 50,
+          night: parsed.night ?? parsed.NIGHT,
+          light: parsed.light ?? parsed.LIGHT,
           raw: rawLine,
         });
         return;
@@ -138,10 +140,9 @@ export class ArduinoSerialHandler {
   async sendCommand(commandStr) {
     if (!this.port || !this.port.writable || !this.connected) return;
     try {
-      const textEncoder = new TextEncoderStream();
-      const writableStreamClosed = textEncoder.readable.pipeTo(this.port.writable);
-      const writer = textEncoder.writable.getWriter();
-      await writer.write(commandStr + '\n');
+      const writer = this.port.writable.getWriter();
+      const payload = new TextEncoder().encode(`${commandStr}\n`);
+      await writer.write(payload);
       writer.releaseLock();
     } catch (err) {
       console.error("Failed to send command:", err);

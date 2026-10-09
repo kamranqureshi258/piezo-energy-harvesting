@@ -8,6 +8,10 @@
     - Piezo Sensor: Analog Pin A1
     - PIR Motion Sensor: Digital Pin 2
     - Streetlight Relay / LED: Digital Pin 3
+    - Day/Night toggle button: Digital Pin 4 to GND (INPUT_PULLUP)
+  Serial commands (9600 baud, newline-terminated):
+    LIGHT:ON / LIGHT:OFF / LIGHT:AUTO
+    MODE:DAY / MODE:NIGHT / MODE:AUTO
   =============================================================================
 */
 
@@ -19,30 +23,41 @@
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// Pin Definitions
 #define LDR_PIN A0
 #define PIEZO_PIN A1
 #define PIR_PIN 2
 #define STREETLIGHT_PIN 3
+#define DAYNIGHT_BTN_PIN 4
 
-// System Variables
 int stepCount = 0;
 float totalVoltage = 0.0;
-float previousVoltage = 0.0; 
+float previousVoltage = 0.0;
 unsigned long lastSerialTime = 0;
+
+enum LightMode { LIGHT_AUTO, LIGHT_FORCE_ON, LIGHT_FORCE_OFF };
+enum DayMode { DAY_AUTO, DAY_FORCE_DAY, DAY_FORCE_NIGHT };
+
+LightMode lightMode = LIGHT_AUTO;
+DayMode dayMode = DAY_AUTO;
+
+bool lastBtnState = HIGH;
+unsigned long lastBtnChangeMs = 0;
+const unsigned long BTN_DEBOUNCE_MS = 40;
+
+String serialBuffer = "";
 
 void setup() {
   Serial.begin(9600);
+  Serial.setTimeout(20);
   pinMode(PIR_PIN, INPUT);
   pinMode(STREETLIGHT_PIN, OUTPUT);
+  pinMode(DAYNIGHT_BTN_PIN, INPUT_PULLUP);
 
-  // Start OLED
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("OLED FAILED TO BOOT!");
-    for (;;); 
+    for (;;);
   }
 
-  // Boot Screen & LED Hardware Self-Test
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
@@ -52,107 +67,150 @@ void setup() {
   display.println("Testing LED Pin 3...");
   display.display();
 
-  // Test LED on Pin 3 for 2 seconds to verify hardware polarity & wiring
   digitalWrite(STREETLIGHT_PIN, HIGH);
   delay(2000);
   digitalWrite(STREETLIGHT_PIN, LOW);
 
   display.clearDisplay();
-  display.setCursor(10, 20);
+  display.setCursor(10, 12);
   display.println("System Ready!");
+  display.setCursor(10, 28);
+  display.println("D4: Day/Night button");
   display.display();
   delay(1000);
 
-  // SYNC BASELINE: Read residual charge to prevent phantom initial step
   int initialRead = analogRead(PIEZO_PIN);
   previousVoltage = (initialRead / 1023.0) * 5.0;
 }
 
-void loop() {
-  // 1. Read Ambient Light (LDR)
-  int ldrValue = analogRead(LDR_PIN);
-  // Support both LDR module types (analog value < 600 or > 600)
-  bool isNight = (ldrValue < 600); 
+void applySerialCommand(String input) {
+  input.trim();
+  if (input.length() == 0) return;
 
-  // 2. Read Motion Sensor (PIR)
-  int motionDetected = digitalRead(PIR_PIN);
+  if (input.startsWith("PWM:")) {
+    int pwmVal = input.substring(4).toInt();
+    lightMode = (pwmVal > 0) ? LIGHT_FORCE_ON : LIGHT_FORCE_OFF;
+  } else if (input.equalsIgnoreCase("LIGHT:ON")) {
+    lightMode = LIGHT_FORCE_ON;
+  } else if (input.equalsIgnoreCase("LIGHT:OFF")) {
+    lightMode = LIGHT_FORCE_OFF;
+  } else if (input.equalsIgnoreCase("LIGHT:AUTO")) {
+    lightMode = LIGHT_AUTO;
+  } else if (input.equalsIgnoreCase("MODE:DAY") || input.equalsIgnoreCase("DAY")) {
+    dayMode = DAY_FORCE_DAY;
+  } else if (input.equalsIgnoreCase("MODE:NIGHT") || input.equalsIgnoreCase("NIGHT")) {
+    dayMode = DAY_FORCE_NIGHT;
+  } else if (input.equalsIgnoreCase("MODE:AUTO") || input.equalsIgnoreCase("AUTO")) {
+    dayMode = DAY_AUTO;
+  }
+}
 
-  // 3. Smart Streetlight Logic (Sensor Auto Mode + Web Command Override)
-  static bool webOverrideOn = false;
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.startsWith("PWM:")) {
-      int pwmVal = input.substring(4).toInt();
-      webOverrideOn = (pwmVal > 0);
-    } else if (input.equalsIgnoreCase("LIGHT:ON")) {
-      webOverrideOn = true;
-    } else if (input.equalsIgnoreCase("LIGHT:OFF")) {
-      webOverrideOn = false;
+void pollSerial() {
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (serialBuffer.length() > 0) {
+        applySerialCommand(serialBuffer);
+        serialBuffer = "";
+      }
+    } else {
+      if (serialBuffer.length() < 48) {
+        serialBuffer += c;
+      }
     }
   }
+}
 
-  // Turn ON streetlight if Night + Motion detected, OR if web app override is ON
-  bool shouldTurnOn = (isNight && motionDetected == HIGH) || webOverrideOn;
-  if (shouldTurnOn) {
-    digitalWrite(STREETLIGHT_PIN, HIGH);
+void pollDayNightButton() {
+  bool btnState = digitalRead(DAYNIGHT_BTN_PIN);
+  unsigned long now = millis();
+  if (btnState != lastBtnState && (now - lastBtnChangeMs) > BTN_DEBOUNCE_MS) {
+    lastBtnChangeMs = now;
+    lastBtnState = btnState;
+    if (btnState == LOW) {
+      if (dayMode == DAY_AUTO) {
+        dayMode = DAY_FORCE_NIGHT;
+      } else if (dayMode == DAY_FORCE_NIGHT) {
+        dayMode = DAY_FORCE_DAY;
+      } else {
+        dayMode = DAY_AUTO;
+      }
+    }
+  }
+}
+
+void loop() {
+  pollSerial();
+  pollDayNightButton();
+
+  int ldrValue = analogRead(LDR_PIN);
+  bool ldrIsNight = (ldrValue < 600);
+
+  bool isNight = ldrIsNight;
+  if (dayMode == DAY_FORCE_DAY) isNight = false;
+  if (dayMode == DAY_FORCE_NIGHT) isNight = true;
+
+  int motionDetected = digitalRead(PIR_PIN);
+
+  bool shouldTurnOn = false;
+  if (lightMode == LIGHT_FORCE_ON) {
+    shouldTurnOn = true;
+  } else if (lightMode == LIGHT_FORCE_OFF) {
+    shouldTurnOn = false;
   } else {
-    digitalWrite(STREETLIGHT_PIN, LOW);
+    shouldTurnOn = (isNight && motionDetected == HIGH);
   }
 
-  // 4. Physical Piezo Energy Harvesting (Ultra-Sensitive Delta)
+  digitalWrite(STREETLIGHT_PIN, shouldTurnOn ? HIGH : LOW);
+
   int rawPiezo = analogRead(PIEZO_PIN);
-  float currentVoltage = (rawPiezo / 1023.0) * 5.0; 
+  float currentVoltage = (rawPiezo / 1023.0) * 5.0;
 
-  if ((currentVoltage - previousVoltage) >= 0.01) { 
+  if ((currentVoltage - previousVoltage) >= 0.01) {
     stepCount++;
-    totalVoltage += (currentVoltage - previousVoltage); 
-    delay(250); 
-  } 
-  
-  previousVoltage = currentVoltage; 
+    totalVoltage += (currentVoltage - previousVoltage);
+    delay(250);
+  }
 
-  // 5. Update OLED Interface with Live Hardware Debug Info
+  previousVoltage = currentVoltage;
+
+  const char* dayLabel = "AUTO-DAY";
+  if (dayMode == DAY_FORCE_NIGHT) dayLabel = "MAN-NIGHT";
+  else if (dayMode == DAY_FORCE_DAY) dayLabel = "MAN-DAY";
+  else if (isNight) dayLabel = "AUTO-NIGHT";
+
   display.clearDisplay();
-  
-  // Line 1: Status & LDR Raw Value
+
   display.setCursor(0, 0);
   display.print("LDR:");
   display.print(ldrValue);
   display.print(" ");
   display.println(isNight ? "[NIGHT]" : "[DAY]");
-  
-  // Line 2: PIR Motion & Steps
+
   display.setCursor(0, 16);
   display.print("PIR:");
   display.print(motionDetected == HIGH ? "MOTION " : "IDLE   ");
   display.print("Stp:");
   display.println(stepCount);
-  
-  // Line 3: Harvested Voltage
+
   display.setCursor(0, 32);
-  display.print("Harvested: ");
-  display.print(totalVoltage, 2);
-  display.println(" V");
-  
-  // Line 4: Pin 3 LED Output State
+  display.print("Mode:");
+  display.print(dayLabel);
+  display.print(lightMode == LIGHT_FORCE_ON ? " L:ON" : (lightMode == LIGHT_FORCE_OFF ? " L:OFF" : " L:AU"));
+
   display.setCursor(0, 48);
   display.print("LED Pin 3: ");
-  if (digitalRead(STREETLIGHT_PIN) == HIGH) {
-    display.println("ON [HIGH]");
-  } else {
-    display.println("OFF [LOW]");
-  }
-  
+  display.println(shouldTurnOn ? "ON [HIGH]" : "OFF [LOW]");
+
   display.display();
 
-
-  // 6. Serial Telemetry Stream for Web Application & Global Cloud Sync
   unsigned long now = millis();
   if (now - lastSerialTime >= 200) {
     lastSerialTime = now;
-    
+
     int ambientLuxPct = map(ldrValue, 0, 1023, 100, 0);
+    if (dayMode == DAY_FORCE_NIGHT) ambientLuxPct = 8;
+    if (dayMode == DAY_FORCE_DAY) ambientLuxPct = 92;
     if (ambientLuxPct < 0) ambientLuxPct = 0;
     if (ambientLuxPct > 100) ambientLuxPct = 100;
 
@@ -164,6 +222,10 @@ void loop() {
     Serial.print(currentVoltage, 2);
     Serial.print(",\"lux\":");
     Serial.print(ambientLuxPct);
+    Serial.print(",\"night\":");
+    Serial.print(isNight ? 1 : 0);
+    Serial.print(",\"light\":");
+    Serial.print(shouldTurnOn ? 1 : 0);
     Serial.println("}");
   }
 }
