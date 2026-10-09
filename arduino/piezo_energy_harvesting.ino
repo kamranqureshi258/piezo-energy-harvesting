@@ -42,16 +42,26 @@ void setup() {
     for (;;); 
   }
 
-  // Boot Screen
+  // Boot Screen & LED Hardware Self-Test
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
-  display.setCursor(10, 20);
+  display.setCursor(10, 10);
   display.println("PROTOTYPE BOOTING...");
-  display.setCursor(10, 35);
-  display.println("PiezoGrid System");
+  display.setCursor(10, 25);
+  display.println("Testing LED Pin 3...");
   display.display();
+
+  // Test LED on Pin 3 for 2 seconds to verify hardware polarity & wiring
+  digitalWrite(STREETLIGHT_PIN, HIGH);
   delay(2000);
+  digitalWrite(STREETLIGHT_PIN, LOW);
+
+  display.clearDisplay();
+  display.setCursor(10, 20);
+  display.println("System Ready!");
+  display.display();
+  delay(1000);
 
   // SYNC BASELINE: Read residual charge to prevent phantom initial step
   int initialRead = analogRead(PIEZO_PIN);
@@ -61,74 +71,81 @@ void setup() {
 void loop() {
   // 1. Read Ambient Light (LDR)
   int ldrValue = analogRead(LDR_PIN);
-  bool isNight = (ldrValue < 500); 
+  // Support both LDR module types (analog value < 600 or > 600)
+  bool isNight = (ldrValue < 600); 
 
   // 2. Read Motion Sensor (PIR)
   int motionDetected = digitalRead(PIR_PIN);
 
   // 3. Smart Streetlight Logic (Sensor Auto Mode + Web Command Override)
-  bool webOverrideOn = false;
+  static bool webOverrideOn = false;
   if (Serial.available() > 0) {
     String input = Serial.readStringUntil('\n');
     input.trim();
     if (input.startsWith("PWM:")) {
       int pwmVal = input.substring(4).toInt();
-      if (pwmVal > 0) webOverrideOn = true;
+      webOverrideOn = (pwmVal > 0);
     } else if (input.equalsIgnoreCase("LIGHT:ON")) {
       webOverrideOn = true;
+    } else if (input.equalsIgnoreCase("LIGHT:OFF")) {
+      webOverrideOn = false;
     }
   }
 
-  if ((isNight && motionDetected == HIGH) || webOverrideOn) {
+  // Turn ON streetlight if Night + Motion detected, OR if web app override is ON
+  bool shouldTurnOn = (isNight && motionDetected == HIGH) || webOverrideOn;
+  if (shouldTurnOn) {
     digitalWrite(STREETLIGHT_PIN, HIGH);
   } else {
     digitalWrite(STREETLIGHT_PIN, LOW);
   }
 
-
   // 4. Physical Piezo Energy Harvesting (Ultra-Sensitive Delta)
   int rawPiezo = analogRead(PIEZO_PIN);
   float currentVoltage = (rawPiezo / 1023.0) * 5.0; 
 
-  // Lowered threshold to 0.01V to catch single taps on 1000uF capacitor
   if ((currentVoltage - previousVoltage) >= 0.01) { 
     stepCount++;
-    totalVoltage += (currentVoltage - previousVoltage); // Add newly harvested amount
-    delay(250); // Prevent double-counting same vibration
+    totalVoltage += (currentVoltage - previousVoltage); 
+    delay(250); 
   } 
   
-  // Constantly update baseline
   previousVoltage = currentVoltage; 
 
-  // 5. Update OLED Interface
+  // 5. Update OLED Interface with Live Hardware Debug Info
   display.clearDisplay();
   
-  // Status Line
+  // Line 1: Status & LDR Raw Value
   display.setCursor(0, 0);
-  display.print("STATUS: ");
-  display.println(isNight ? "NIGHT" : "DAY");
+  display.print("LDR:");
+  display.print(ldrValue);
+  display.print(" ");
+  display.println(isNight ? "[NIGHT]" : "[DAY]");
   
-  // Steps Line
-  display.setCursor(0, 15);
-  display.print("Steps:  ");
+  // Line 2: PIR Motion & Steps
+  display.setCursor(0, 16);
+  display.print("PIR:");
+  display.print(motionDetected == HIGH ? "MOTION " : "IDLE   ");
+  display.print("Stp:");
   display.println(stepCount);
   
-  // Harvested Line
-  display.setCursor(0, 30);
+  // Line 3: Harvested Voltage
+  display.setCursor(0, 32);
   display.print("Harvested: ");
   display.print(totalVoltage, 2);
   display.println(" V");
   
-  // Streetlight Line
-  display.setCursor(0, 45);
-  display.print("Streetlight: ");
+  // Line 4: Pin 3 LED Output State
+  display.setCursor(0, 48);
+  display.print("LED Pin 3: ");
   if (digitalRead(STREETLIGHT_PIN) == HIGH) {
-    display.println("ON");
+    display.println("ON [HIGH]");
   } else {
-    display.println("OFF");
+    display.println("OFF [LOW]");
   }
   
   display.display();
+
 
   // 6. Serial Telemetry Stream for Web Application & Global Cloud Sync
   unsigned long now = millis();
