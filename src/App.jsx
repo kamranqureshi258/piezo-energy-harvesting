@@ -48,6 +48,11 @@ export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [serialError, setSerialError] = useState(null);
 
+  // Physical LED (Pin 3) control: 'AUTO' = Arduino sensors, 'ON'/'OFF' = forced from web
+  const [lightCommand, setLightCommand] = useState('AUTO');
+  const [hwReady, setHwReady] = useState(false);
+  const [hwLedOn, setHwLedOn] = useState(null);
+
   // Historical Stream for Charts
   const [history, setHistory] = useState([]);
 
@@ -89,6 +94,8 @@ export default function App() {
         setVCap(data.vCap);
         setPulse(data.pulse);
         setAmbientLux(data.lux);
+        setHwReady(true);
+        if (data.ledOn !== null && data.ledOn !== undefined) setHwLedOn(data.ledOn);
       },
       onConnect: () => {
         setIsConnected(true);
@@ -99,6 +106,8 @@ export default function App() {
       },
       onDisconnect: () => {
         setIsConnected(false);
+        setHwReady(false);
+        setHwLedOn(null);
         setIsSimulator(true);
         aiVoice.speak("Arduino disconnected. Switching to simulator mode.");
         if (simulatorRef.current) simulatorRef.current.start();
@@ -147,12 +156,21 @@ export default function App() {
   // Compute Energy Metrics
   const energyMetrics = calculateEnergyMetrics({ vCap, footsteps: steps });
 
-  // Send PWM command to Arduino & Simulator + Broadcast Telemetry to Cloud
+  // Arduino resets when the port opens, so wait for its first telemetry (hwReady) before sending.
   useEffect(() => {
-    if (isConnected && serialHandlerRef.current) {
+    if (isConnected && hwReady && serialHandlerRef.current) {
+      serialHandlerRef.current.sendCommand(`LIGHT:${lightCommand}`);
+    }
+  }, [lightCommand, isConnected, hwReady]);
+
+  useEffect(() => {
+    if (isConnected && hwReady && serialHandlerRef.current) {
       serialHandlerRef.current.sendCommand(`PWM:${lightState.pwmValue}`);
     }
+  }, [lightState.pwmValue, isConnected, hwReady]);
 
+  // Drive Simulator + Broadcast Telemetry to Cloud
+  useEffect(() => {
     if (isSimulator && simulatorRef.current) {
       simulatorRef.current.tick(lightState.brightness);
     }
@@ -231,19 +249,24 @@ export default function App() {
   };
 
   const handleForceLightToggle = () => {
-    const isCurrentlyOn = lightState.brightness > 0;
-    const targetBrightness = isCurrentlyOn ? 0 : 100;
+    const isCurrentlyOn = isConnected && hwLedOn !== null ? hwLedOn : lightState.brightness > 0;
     const targetPWM = isCurrentlyOn ? 0 : 255;
 
     setManualOverride(true);
-    setManualBrightness(targetBrightness);
-
-    if (isConnected && serialHandlerRef.current) {
-      serialHandlerRef.current.sendCommand(`PWM:${targetPWM}`);
-      serialHandlerRef.current.sendCommand(isCurrentlyOn ? "LIGHT:OFF" : "LIGHT:ON");
-    }
+    setManualBrightness(isCurrentlyOn ? 0 : 100);
+    setLightCommand(isCurrentlyOn ? 'OFF' : 'ON');
 
     cloudSync.sendRemoteControl(`PWM:${targetPWM}`);
+  };
+
+  const handleSetManualOverride = (isManual) => {
+    setManualOverride(isManual);
+    if (!isManual) setLightCommand('AUTO');
+  };
+
+  const handleManualBrightnessChange = (value) => {
+    setManualBrightness(value);
+    setLightCommand(value > 0 ? 'ON' : 'OFF');
   };
 
   return (
@@ -308,14 +331,14 @@ export default function App() {
             {/* Primary 3D Footpath & Streetlamp Viewport with Direct Light Adjustment Controls */}
             <InteractiveRoomScene
               brightness={lightState.brightness}
-              onBrightnessChange={setManualBrightness}
+              onBrightnessChange={handleManualBrightnessChange}
               vCap={vCap}
               weather={weather}
               hour={hour}
               pulse={pulse}
               onHourChange={setHour}
               manualOverride={manualOverride}
-              onToggleManualOverride={setManualOverride}
+              onToggleManualOverride={handleSetManualOverride}
             />
 
             {/* Smart Presets Selector */}
@@ -385,9 +408,9 @@ export default function App() {
               <LightController
                 lightState={lightState}
                 manualOverride={manualOverride}
-                onToggleManualOverride={setManualOverride}
+                onToggleManualOverride={handleSetManualOverride}
                 manualBrightness={manualBrightness}
-                onManualBrightnessChange={setManualBrightness}
+                onManualBrightnessChange={handleManualBrightnessChange}
                 ambientLux={ambientLux}
                 weather={weather}
                 vCap={vCap}

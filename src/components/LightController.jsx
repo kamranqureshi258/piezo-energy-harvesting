@@ -37,7 +37,7 @@ export default function LightController({
           </div>
           <div>
             <h2 className="text-base font-bold text-slate-100">Smart LED Light Control</h2>
-            <p className="text-xs text-slate-400">PWM Pin 9 Output ({pwmValue} / 255)</p>
+            <p className="text-xs text-slate-400">Pin 3 Output ({pwmValue} / 255)</p>
           </div>
         </div>
 

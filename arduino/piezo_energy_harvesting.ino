@@ -31,6 +31,40 @@ float totalVoltage = 0.0;
 float previousVoltage = 0.0; 
 unsigned long lastSerialTime = 0;
 
+// Streetlight control from the web app:
+//   LIGHT:ON / LIGHT:OFF force the LED, LIGHT:AUTO returns to sensor mode.
+//   PWM:<0-255> is the web auto-algorithm request (only used in AUTO mode).
+enum LightMode { LIGHT_AUTO, LIGHT_FORCE_ON, LIGHT_FORCE_OFF };
+LightMode lightMode = LIGHT_AUTO;
+bool webPwmRequestOn = false;
+String serialLine = "";
+
+void handleCommand(String cmd) {
+  cmd.trim();
+  if (cmd.equalsIgnoreCase("LIGHT:ON")) {
+    lightMode = LIGHT_FORCE_ON;
+  } else if (cmd.equalsIgnoreCase("LIGHT:OFF")) {
+    lightMode = LIGHT_FORCE_OFF;
+  } else if (cmd.equalsIgnoreCase("LIGHT:AUTO")) {
+    lightMode = LIGHT_AUTO;
+  } else if (cmd.startsWith("PWM:")) {
+    webPwmRequestOn = (cmd.substring(4).toInt() > 0);
+  }
+}
+
+// Non-blocking: drain every complete command waiting in the RX buffer.
+void readSerialCommands() {
+  while (Serial.available() > 0) {
+    char c = Serial.read();
+    if (c == '\n' || c == '\r') {
+      if (serialLine.length() > 0) handleCommand(serialLine);
+      serialLine = "";
+    } else if (serialLine.length() < 32) {
+      serialLine += c;
+    }
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   pinMode(PIR_PIN, INPUT);
@@ -77,28 +111,17 @@ void loop() {
   // 2. Read Motion Sensor (PIR)
   int motionDetected = digitalRead(PIR_PIN);
 
-  // 3. Smart Streetlight Logic (Sensor Auto Mode + Web Command Override)
-  static bool webOverrideOn = false;
-  if (Serial.available() > 0) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.startsWith("PWM:")) {
-      int pwmVal = input.substring(4).toInt();
-      webOverrideOn = (pwmVal > 0);
-    } else if (input.equalsIgnoreCase("LIGHT:ON")) {
-      webOverrideOn = true;
-    } else if (input.equalsIgnoreCase("LIGHT:OFF")) {
-      webOverrideOn = false;
-    }
-  }
-
-  // Turn ON streetlight if Night + Motion detected, OR if web app override is ON
-  bool shouldTurnOn = (isNight && motionDetected == HIGH) || webOverrideOn;
-  if (shouldTurnOn) {
-    digitalWrite(STREETLIGHT_PIN, HIGH);
+  // 3. Smart Streetlight Logic (Web force ON/OFF, otherwise sensors + web auto request)
+  readSerialCommands();
+  bool shouldTurnOn;
+  if (lightMode == LIGHT_FORCE_ON) {
+    shouldTurnOn = true;
+  } else if (lightMode == LIGHT_FORCE_OFF) {
+    shouldTurnOn = false;
   } else {
-    digitalWrite(STREETLIGHT_PIN, LOW);
+    shouldTurnOn = (isNight && motionDetected == HIGH) || webPwmRequestOn;
   }
+  digitalWrite(STREETLIGHT_PIN, shouldTurnOn ? HIGH : LOW);
 
   // 4. Physical Piezo Energy Harvesting (Ultra-Sensitive Delta)
   int rawPiezo = analogRead(PIEZO_PIN);
@@ -137,12 +160,12 @@ void loop() {
   
   // Line 4: Pin 3 LED Output State
   display.setCursor(0, 48);
-  display.print("LED Pin 3: ");
-  if (digitalRead(STREETLIGHT_PIN) == HIGH) {
-    display.println("ON [HIGH]");
-  } else {
-    display.println("OFF [LOW]");
-  }
+  display.print("LED:");
+  display.print(shouldTurnOn ? "ON " : "OFF");
+  display.print(" Mode:");
+  if (lightMode == LIGHT_FORCE_ON) display.println("WEB-ON");
+  else if (lightMode == LIGHT_FORCE_OFF) display.println("WEB-OFF");
+  else display.println("AUTO");
   
   display.display();
 
@@ -164,6 +187,8 @@ void loop() {
     Serial.print(currentVoltage, 2);
     Serial.print(",\"lux\":");
     Serial.print(ambientLuxPct);
+    Serial.print(",\"led\":");
+    Serial.print(shouldTurnOn ? 1 : 0);
     Serial.println("}");
   }
 }
