@@ -230,6 +230,22 @@ export default function App() {
     }
   };
 
+  const handleForceLightToggle = () => {
+    const isCurrentlyOn = lightState.brightness > 0;
+    const targetBrightness = isCurrentlyOn ? 0 : 100;
+    const targetPWM = isCurrentlyOn ? 0 : 255;
+
+    setManualOverride(true);
+    setManualBrightness(targetBrightness);
+
+    if (isConnected && serialHandlerRef.current) {
+      serialHandlerRef.current.sendCommand(`PWM:${targetPWM}`);
+      serialHandlerRef.current.sendCommand(isCurrentlyOn ? "LIGHT:OFF" : "LIGHT:ON");
+    }
+
+    cloudSync.sendRemoteControl(`PWM:${targetPWM}`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-slate-950">
       {/* Top Navbar */}
@@ -247,7 +263,9 @@ export default function App() {
         isMuted={isMuted}
         onToggleMute={handleToggleMute}
         isCloudConnected={isCloudConnected}
+        onForceLightToggle={handleForceLightToggle}
       />
+
 
 
       {/* Main Container */}
