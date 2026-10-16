@@ -30,3 +30,7 @@ android/app/libs/
 *.sln
 *.sw?
 
+
+# Local Wi-Fi credentials for Arduino/ESP8266 sketches (never commit)
+arduino/**/secrets.h
+nodemcu/secrets.h

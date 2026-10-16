@@ -135,7 +135,7 @@ export default function FootstepSimulator({
 
         <div className="space-y-1.5">
           <div className="flex justify-between text-xs font-semibold">
-            <span className="text-slate-400">Ambient Brightness Sensor (LDR Lux):</span>
+            <span className="text-slate-400">Ambient Brightness Sensor (LDR %):</span>
             <span className="text-amber-400 font-bold">{ambientLux}%</span>
           </div>
           <input

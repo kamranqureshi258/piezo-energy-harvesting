@@ -146,6 +146,7 @@ export class ArduinoSerialHandler {
       writer.releaseLock();
     } catch (err) {
       console.error("Failed to send command:", err);
+      this.onError(err.message || "Failed to send command to the Arduino.");
     }
   }
 

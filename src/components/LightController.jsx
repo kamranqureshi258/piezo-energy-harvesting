@@ -37,7 +37,7 @@ export default function LightController({
           </div>
           <div>
             <h2 className="text-base font-bold text-slate-100">Smart LED Light Control</h2>
-            <p className="text-xs text-slate-400">PWM Pin 9 Output ({pwmValue} / 255)</p>
+            <p className="text-xs text-slate-400">LED Pin 9 (on/off) · PWM target {pwmValue}/255</p>
           </div>
         </div>
 
@@ -135,7 +135,7 @@ export default function LightController({
 
           {/* Capacitor Power Cap */}
           <div className="flex items-center justify-between text-xs">
-            <span className="text-slate-400">Capacitor Power Cap:</span>
+            <span className="text-slate-400">Signal Level Cap (model):</span>
             <span className={`font-mono font-bold ${energySaveMode ? 'text-rose-400' : 'text-emerald-400'}`}>
               {capState}%
             </span>

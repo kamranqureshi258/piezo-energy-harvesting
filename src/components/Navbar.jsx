@@ -15,9 +15,26 @@ export default function Navbar({
   isMuted,
   onToggleMute,
   isCloudConnected = true,
+  gatewayOnline = false,
+  ledCommand = null,
   onForceLightToggle,
   lightOn = false,
 }) {
+  // LED command lifecycle: pending while the gateway acknowledgment is in
+  // flight; failed covers timeout / rejected / offline / transport errors.
+  const cmdPending = Boolean(ledCommand && ledCommand.state === 'pending');
+  const cmdFailed = Boolean(
+    ledCommand && ['timeout', 'rejected', 'failed', 'offline'].includes(ledCommand.state)
+  );
+  const gatewayUnavailable = !gatewayOnline && !isConnected;
+  const buttonDisabled = cmdPending || gatewayUnavailable;
+  const buttonTooltip = cmdPending
+    ? 'Waiting for the gateway acknowledgment…'
+    : cmdFailed
+      ? `Last command not acknowledged (${ledCommand.state}${ledCommand.detail ? ': ' + ledCommand.detail : ''})`
+      : gatewayUnavailable
+        ? 'Designated gateway offline — LED commands cannot be delivered right now'
+        : 'Force Turn ON/OFF the physical streetlight LED';
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 text-slate-100 shadow-xl backdrop-blur-md">
@@ -96,19 +113,24 @@ export default function Navbar({
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
-          {/* Direct Force Physical Streetlight (Pin 3) Button */}
+          {/* Direct Force Physical Streetlight Button (secure designated-gateway path) */}
           {onForceLightToggle && (
             <button
-              onClick={() => onForceLightToggle()}
-              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shadow-md active:scale-95 flex items-center space-x-1.5 border ${
-                lightOn
-                  ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 border-amber-300'
-                  : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
-              }`}
-              title="Force Turn ON/OFF Physical Pin 3 LED & 3D Streetlight"
+              onClick={() => { if (!buttonDisabled) onForceLightToggle(); }}
+              disabled={buttonDisabled}
+              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shadow-md flex items-center space-x-1.5 border ${
+                buttonDisabled
+                  ? 'bg-slate-800/60 text-slate-500 border-slate-700 cursor-not-allowed opacity-70'
+                  : cmdFailed
+                    ? 'bg-rose-900/40 text-rose-200 border-rose-700 hover:bg-rose-900/60'
+                    : lightOn
+                      ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 border-amber-300'
+                      : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
+              } ${cmdPending ? 'animate-pulse' : 'active:scale-95'}`}
+              title={buttonTooltip}
             >
-              <Zap className={`w-3.5 h-3.5 ${lightOn ? 'text-slate-950' : 'text-slate-400'}`} />
-              <span>{lightOn ? 'Light ON' : 'Light OFF'}</span>
+              <Zap className={`w-3.5 h-3.5 ${lightOn && !buttonDisabled ? 'text-slate-950' : 'text-slate-400'}`} />
+              <span>{cmdPending ? 'Sending…' : lightOn ? 'Light ON' : 'Light OFF'}</span>
             </button>
           )}
 

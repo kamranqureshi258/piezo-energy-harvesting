@@ -7,3 +7,13 @@ services:
     envVars:
       - key: PORT
         value: 10000
+      # Secret: set the value in the Render dashboard. Never commit it.
+      - key: GATEWAY_TOKEN
+        sync: false
+      # Optional override; server.js defaults to the deployed Vercel origin
+      # plus local Vite dev origins when unset.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      # How long the server waits for a gateway acknowledgment (ms).
+      - key: LED_COMMAND_TIMEOUT_MS
+        value: 5000

@@ -131,7 +131,7 @@ export default function Oscilloscope({ vCap = 0, pulse = 0, steps = 0 }) {
 
         {/* Oscilloscope Corner Overlay Labels */}
         <div className="absolute top-2 left-3 text-[10px] font-mono text-emerald-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded border border-emerald-900">
-          V_peak: {(vCap + pulse).toFixed(2)} V
+          A1 now: {pulse.toFixed(2)} V
         </div>
         <div className="absolute top-2 right-3 text-[10px] font-mono text-cyan-400 font-bold bg-slate-950/80 px-2 py-0.5 rounded border border-cyan-900">
           Freq: 10 Hz | 200ms

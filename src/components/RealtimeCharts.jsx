@@ -26,7 +26,7 @@ export default function RealtimeCharts({ history = [] }) {
           </div>
           <div>
             <h2 className="text-base font-bold text-slate-100">Live Telemetry Analytics</h2>
-            <p className="text-xs text-slate-400">Real-Time Sensor Telemetry Stream (200ms)</p>
+            <p className="text-xs text-slate-400">Real-Time Sensor Telemetry Stream (1s sampling)</p>
           </div>
         </div>
 
@@ -92,7 +92,7 @@ export default function RealtimeCharts({ history = [] }) {
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '12px' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Area type="monotone" dataKey="vCap" name="Capacitor Voltage (V)" stroke="#f59e0b" fillOpacity={1} fill="url(#vCapGrad)" strokeWidth={2} />
+                <Area type="monotone" dataKey="vCap" name="Piezo Activity ΣΔV (V)" stroke="#f59e0b" fillOpacity={1} fill="url(#vCapGrad)" strokeWidth={2} />
                 <Area type="monotone" dataKey="pulse" name="Pulse Voltage (V)" stroke="#06b6d4" fillOpacity={1} fill="url(#pulseGrad)" strokeWidth={1.5} />
               </AreaChart>
             ) : activeTab === 'brightness' ? (
@@ -105,7 +105,7 @@ export default function RealtimeCharts({ history = [] }) {
                 />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
                 <Line type="stepAfter" dataKey="brightness" name="Light Output (%)" stroke="#10b981" strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="lux" name="Ambient Lux (%)" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                <Line type="monotone" dataKey="lux" name="Ambient Light (%)" stroke="#a855f7" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
               </LineChart>
             ) : (
               <AreaChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
