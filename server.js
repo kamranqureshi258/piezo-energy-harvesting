@@ -32,7 +32,10 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 
 const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '';
-const LED_COMMAND_TIMEOUT_MS = Number(process.env.LED_COMMAND_TIMEOUT_MS || 5000);
+// The ESP8266 may be finishing a bounded 15 s HTTPS sync when a browser
+// queues a command. Keep the command alive long enough for that sync to end,
+// the next poll to deliver it, and the following poll to return its ack.
+const LED_COMMAND_TIMEOUT_MS = Number(process.env.LED_COMMAND_TIMEOUT_MS || 30000);
 const CONTROL_RATE_LIMIT_MS = Number(process.env.CONTROL_RATE_LIMIT_MS || 400);
 
 const DEFAULT_ORIGINS = [
@@ -68,14 +71,20 @@ const io = new Server(server, {
 
 // Global Telemetry State Store
 let globalState = {
-  steps: 142,
-  vCap: 4.18,
-  pulse: 0.0,
-  lux: 48,
-  weather: 'sunny',
-  brightness: 75,
-  updatedAt: new Date().toISOString(),
+  steps: null,
+  vCap: null,
+  pulse: null,
+  lux: null,
+  weather: null,
+  brightness: null,
+  updatedAt: null,
 };
+
+function finiteTelemetryNumber(value) {
+  if (value === null || value === undefined || value === '') return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
 
 // Designated-gateway registry and command bookkeeping
 let gateway = null; // the single authenticated gateway socket
@@ -146,17 +155,26 @@ app.get('/', (req, res) => {
   });
 });
 
-// REST API Ingestion Endpoint for ESP32 / Arduino / Gateways
+// Legacy REST ingestion endpoint, protected with the same gateway token.
 app.post('/api/telemetry', (req, res) => {
+  if (!isGatewayTokenValid(req.get('x-gateway-token'))) {
+    return res.status(401).json({ success: false, error: 'unauthorized' });
+  }
   const { steps, vCap, pulse, lux, weather, brightness } = req.body;
 
-  if (steps !== undefined) globalState.steps = Number(steps);
-  if (vCap !== undefined) globalState.vCap = Number(vCap);
-  if (pulse !== undefined) globalState.pulse = Number(pulse);
-  if (lux !== undefined) globalState.lux = Number(lux);
-  if (weather !== undefined) globalState.weather = weather;
-  if (brightness !== undefined) globalState.brightness = Number(brightness);
-  globalState.updatedAt = new Date().toISOString();
+  let telemetryUpdated = false;
+  for (const [key, value] of Object.entries({ steps, vCap, pulse, lux, brightness })) {
+    const number = finiteTelemetryNumber(value);
+    if (number !== undefined) {
+      globalState[key] = number;
+      telemetryUpdated = true;
+    }
+  }
+  if (typeof weather === 'string' && weather.length <= 32) {
+    globalState.weather = weather;
+    telemetryUpdated = true;
+  }
+  if (telemetryUpdated) globalState.updatedAt = new Date().toISOString();
 
   // Broadcast update to all global clients
   io.emit('telemetry:update', globalState);
@@ -190,19 +208,19 @@ app.post('/api/gateway/sync', (req, res) => {
   // Telemetry ingest — same schema and merge as POST /api/telemetry, plus a
   // finiteness guard: a field that does not coerce to a finite number (e.g.
   // "abc") is skipped rather than poisoning the shared state with NaN.
-  const finiteNumber = (value) => {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : undefined;
-  };
+  const finiteNumber = finiteTelemetryNumber;
   const { steps, vCap, pulse, lux, weather, brightness } = body;
-  if (steps !== undefined) { const n = finiteNumber(steps); if (n !== undefined) globalState.steps = n; }
-  if (vCap !== undefined) { const n = finiteNumber(vCap); if (n !== undefined) globalState.vCap = n; }
-  if (pulse !== undefined) { const n = finiteNumber(pulse); if (n !== undefined) globalState.pulse = n; }
-  if (lux !== undefined) { const n = finiteNumber(lux); if (n !== undefined) globalState.lux = n; }
-  if (weather !== undefined) globalState.weather = weather;
-  if (brightness !== undefined) { const n = finiteNumber(brightness); if (n !== undefined) globalState.brightness = n; }
-  globalState.updatedAt = new Date().toISOString();
-  io.emit('telemetry:update', globalState);
+  let telemetryUpdated = false;
+  if (steps !== undefined) { const n = finiteNumber(steps); if (n !== undefined) { globalState.steps = n; telemetryUpdated = true; } }
+  if (vCap !== undefined) { const n = finiteNumber(vCap); if (n !== undefined) { globalState.vCap = n; telemetryUpdated = true; } }
+  if (pulse !== undefined) { const n = finiteNumber(pulse); if (n !== undefined) { globalState.pulse = n; telemetryUpdated = true; } }
+  if (lux !== undefined) { const n = finiteNumber(lux); if (n !== undefined) { globalState.lux = n; telemetryUpdated = true; } }
+  if (weather !== undefined) { globalState.weather = weather; telemetryUpdated = true; }
+  if (brightness !== undefined) { const n = finiteNumber(brightness); if (n !== undefined) { globalState.brightness = n; telemetryUpdated = true; } }
+  if (telemetryUpdated) {
+    globalState.updatedAt = new Date().toISOString();
+    io.emit('telemetry:update', globalState);
+  }
 
   // Presence: an authenticated sync refreshes the HTTP gateway's lease.
   httpGateway.lastSyncAt = new Date().toISOString();
@@ -234,6 +252,7 @@ app.post('/api/gateway/sync', (req, res) => {
         const latencyMs = Date.now() - Date.parse(pending.issuedAt);
         io.to(pending.requesterId).emit('control:ack', {
           commandId: ack.commandId,
+          command: pending.command,
           status: ack.status,
           detail: ack.detail ?? null,
           latencyMs,
@@ -311,7 +330,22 @@ io.on('connection', (socket) => {
 
   // Gateway telemetry stream
   socket.on('gateway:telemetry', (data) => {
-    globalState = { ...globalState, ...data, updatedAt: new Date().toISOString() };
+    if (socket.data.role !== 'gateway') return;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+    let telemetryUpdated = false;
+    for (const key of ['steps', 'vCap', 'pulse', 'lux', 'brightness']) {
+      const value = finiteTelemetryNumber(data[key]);
+      if (value !== undefined) {
+        globalState[key] = value;
+        telemetryUpdated = true;
+      }
+    }
+    if (typeof data.weather === 'string' && data.weather.length <= 32) {
+      globalState.weather = data.weather;
+      telemetryUpdated = true;
+    }
+    if (!telemetryUpdated) return;
+    globalState.updatedAt = new Date().toISOString();
     socket.broadcast.emit('telemetry:update', globalState);
   });
 
@@ -379,7 +413,7 @@ io.on('connection', (socket) => {
         });
       }
     }, LED_COMMAND_TIMEOUT_MS);
-    pendingCommands.set(commandId, { requesterId: socket.id, timer, issuedAt, transport });
+    pendingCommands.set(commandId, { requesterId: socket.id, timer, issuedAt, transport, command: payload.command });
 
     console.log(
       `⚡ LED command (${transport}) → gateway: ${payload.command} (${commandId})`
@@ -389,6 +423,7 @@ io.on('connection', (socket) => {
 
   // Gateway acknowledgment → relay to the requesting browser only.
   socket.on('command:ack', (ack) => {
+    if (socket.data.role !== 'gateway') return;
     if (!ack || typeof ack.commandId !== 'string') return;
     const pending = pendingCommands.get(ack.commandId);
     if (!pending) return; // unknown, duplicate, or late acknowledgement
@@ -399,6 +434,7 @@ io.on('connection', (socket) => {
     const latencyMs = Date.now() - Date.parse(pending.issuedAt);
     io.to(pending.requesterId).emit('control:ack', {
       commandId: ack.commandId,
+      command: pending.command,
       status: ack.status === 'applied' ? 'applied' : 'rejected',
       detail: ack.detail ?? null,
       latencyMs,
