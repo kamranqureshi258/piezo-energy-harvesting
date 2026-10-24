@@ -5,7 +5,7 @@ const SOURCE_META = {
   cloud: {
     label: 'Live Cloud Telemetry',
     pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40',
-    note: 'Backend values · hardware origin unverified',
+    note: 'Live measurements from the authenticated NodeMCU gateway',
   },
   'cloud-stale': {
     label: 'Cloud Telemetry — STALE',
@@ -16,6 +16,11 @@ const SOURCE_META = {
     label: 'Simulator Demo Data',
     pill: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
     note: 'Generated locally for demonstration — not hardware readings',
+  },
+  waiting: {
+    label: 'Waiting for Arduino',
+    pill: 'bg-slate-700/60 text-slate-300 border-slate-600',
+    note: 'Waiting for live measurements from the NodeMCU gateway',
   },
 };
 
@@ -40,7 +45,7 @@ export default function TelemetryStatusBar({
   lastPayloadAgeMs,
   staleNote,
 }) {
-  const meta = SOURCE_META[source] || SOURCE_META.simulator;
+  const meta = SOURCE_META[source] || SOURCE_META.waiting;
   const updateClock = lastUpdate ? formatClock(lastUpdate) : null;
 
   return (
@@ -72,7 +77,7 @@ export default function TelemetryStatusBar({
           <Zap className={`w-3.5 h-3.5 ${gatewayOnline ? 'text-emerald-400' : 'text-slate-500'}`} />
           {gatewayOnline ? 'Gateway online' : 'Gateway offline'}
         </span>
-        {source !== 'simulator' && lastPayloadAgeMs != null && (
+        {(source === 'cloud' || source === 'cloud-stale') && lastPayloadAgeMs != null && (
           <span
             className="flex items-center gap-1.5"
             title="Time since the last telemetry:update payload arrived from the backend"

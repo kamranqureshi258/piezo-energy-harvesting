@@ -95,12 +95,6 @@ class CloudSyncManager {
     };
   }
 
-  emitGatewayData(telemetryData) {
-    if (this.socket && this.connected) {
-      this.socket.emit('gateway:telemetry', telemetryData);
-    }
-  }
-
   /**
    * Send an LED command through the secure designated-gateway path.
    * Resolves with the server's immediate validation result:

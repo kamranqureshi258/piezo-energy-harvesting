@@ -1,13 +1,7 @@
 import React from 'react';
-import { Zap, Cpu, Usb, RefreshCw, Volume2, VolumeX, Clock, Globe } from 'lucide-react';
+import { Zap, Cpu, Volume2, VolumeX, Clock, Globe } from 'lucide-react';
 
 export default function Navbar({
-  isConnected,
-  isSimulator,
-  onConnectClick,
-  onDisconnectClick,
-  autoFootsteps,
-  onToggleAutoFootsteps,
   weather,
   onWeatherChange,
   hour,
@@ -17,8 +11,8 @@ export default function Navbar({
   isCloudConnected = true,
   gatewayOnline = false,
   ledCommand = null,
-  onForceLightToggle,
-  lightOn = false,
+  onSetPhysicalLight,
+  confirmedLedOn = null,
 }) {
   // LED command lifecycle: pending while the gateway acknowledgment is in
   // flight; failed covers timeout / rejected / offline / transport errors.
@@ -26,7 +20,7 @@ export default function Navbar({
   const cmdFailed = Boolean(
     ledCommand && ['timeout', 'rejected', 'failed', 'offline'].includes(ledCommand.state)
   );
-  const gatewayUnavailable = !gatewayOnline && !isConnected;
+  const gatewayUnavailable = !gatewayOnline;
   const buttonDisabled = cmdPending || gatewayUnavailable;
   const buttonTooltip = cmdPending
     ? 'Waiting for the gateway acknowledgment…'
@@ -34,7 +28,7 @@ export default function Navbar({
       ? `Last command not acknowledged (${ledCommand.state}${ledCommand.detail ? ': ' + ledCommand.detail : ''})`
       : gatewayUnavailable
         ? 'Designated gateway offline — LED commands cannot be delivered right now'
-        : 'Force Turn ON/OFF the physical streetlight LED';
+        : 'Send an explicit ON or OFF command to the physical streetlight';
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50 text-slate-100 shadow-xl backdrop-blur-md">
@@ -113,77 +107,46 @@ export default function Navbar({
             {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
 
-          {/* Direct Force Physical Streetlight Button (secure designated-gateway path) */}
-          {onForceLightToggle && (
-            <button
-              onClick={() => { if (!buttonDisabled) onForceLightToggle(); }}
-              disabled={buttonDisabled}
-              className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shadow-md flex items-center space-x-1.5 border ${
-                buttonDisabled
-                  ? 'bg-slate-800/60 text-slate-500 border-slate-700 cursor-not-allowed opacity-70'
-                  : cmdFailed
-                    ? 'bg-rose-900/40 text-rose-200 border-rose-700 hover:bg-rose-900/60'
-                    : lightOn
-                      ? 'bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 border-amber-300'
-                      : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
-              } ${cmdPending ? 'animate-pulse' : 'active:scale-95'}`}
-              title={buttonTooltip}
-            >
-              <Zap className={`w-3.5 h-3.5 ${lightOn && !buttonDisabled ? 'text-slate-950' : 'text-slate-400'}`} />
-              <span>{cmdPending ? 'Sending…' : lightOn ? 'Light ON' : 'Light OFF'}</span>
-            </button>
-          )}
-
-
-          {/* Source Status Badge */}
-          {isConnected ? (
-            <div className="flex items-center space-x-2 bg-emerald-950/80 border border-emerald-600/60 text-emerald-400 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          {/* Explicit commands avoid using dashboard-model brightness as the
+              physical LED state. Status changes only after the Uno confirms. */}
+          {onSetPhysicalLight && (
+            <div className="flex items-center gap-1.5" title={buttonTooltip}>
+              <button
+                onClick={() => onSetPhysicalLight(true)}
+                disabled={buttonDisabled}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all ${
+                  confirmedLedOn === true && !cmdFailed
+                    ? 'bg-amber-400 text-slate-950 border-amber-300'
+                    : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed ${cmdPending ? 'animate-pulse' : ''}`}
+              >
+                {cmdPending && ledCommand?.command === 'LIGHT:ON' ? 'Sending…' : 'LED ON'}
+              </button>
+              <button
+                onClick={() => onSetPhysicalLight(false)}
+                disabled={buttonDisabled}
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border transition-all ${
+                  confirmedLedOn === false && !cmdFailed
+                    ? 'bg-slate-600 text-white border-slate-500'
+                    : 'bg-slate-800 text-slate-300 border-slate-600 hover:bg-slate-700'
+                } disabled:opacity-50 disabled:cursor-not-allowed ${cmdPending ? 'animate-pulse' : ''}`}
+              >
+                {cmdPending && ledCommand?.command === 'LIGHT:OFF' ? 'Sending…' : 'LED OFF'}
+              </button>
+              <span className={`hidden lg:inline text-[10px] font-semibold ${cmdFailed ? 'text-rose-300' : 'text-slate-400'}`}>
+                {cmdPending ? 'Waiting for device…' : cmdFailed ? `Command ${ledCommand.state}` : confirmedLedOn == null ? 'State unknown' : confirmedLedOn ? 'Confirmed on' : 'Confirmed off'}
               </span>
-              <Usb className="w-4 h-4" />
-              <span>Arduino USB</span>
-            </div>
-          ) : (
-            <div className="flex items-center space-x-2 bg-amber-950/70 border border-amber-600/50 text-amber-300 px-3 py-1.5 rounded-lg text-xs font-semibold">
-              <Cpu className="w-4 h-4 animate-spin-slow" />
-              <span>Simulator</span>
             </div>
           )}
 
-          {/* Connect / Disconnect Action Button */}
-          {isConnected ? (
-            <button
-              onClick={onDisconnectClick}
-              className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-semibold transition-all shadow-md active:scale-95"
-            >
-              Disconnect
-            </button>
-          ) : (
-            <button
-              onClick={onConnectClick}
-              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-all shadow-md active:scale-95 flex items-center space-x-1.5"
-            >
-              <Usb className="w-3.5 h-3.5" />
-              <span>Connect USB</span>
-            </button>
-          )}
 
-          {/* Auto Footsteps Simulator Toggle */}
-          {isSimulator && (
-            <button
-              onClick={onToggleAutoFootsteps}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center space-x-1.5 border ${
-                autoFootsteps
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
-                  : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
-              }`}
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${autoFootsteps ? 'animate-spin' : ''}`} />
-              <span>{autoFootsteps ? 'Auto-Walk ON' : 'Auto-Walk OFF'}</span>
-            </button>
-          )}
+          <div className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${gatewayOnline
+            ? 'bg-emerald-950/80 border-emerald-600/60 text-emerald-400'
+            : 'bg-slate-800/80 border-slate-700 text-slate-400'
+          }`} title={gatewayOnline ? 'NodeMCU gateway is connected to the backend' : 'Waiting for the NodeMCU gateway'}>
+            <Cpu className="w-4 h-4" />
+            <span>{gatewayOnline ? 'NodeMCU Gateway' : 'Gateway Offline'}</span>
+          </div>
         </div>
       </div>
     </header>
