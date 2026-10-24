@@ -32,14 +32,13 @@
 */
 
 #include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <U8x8lib.h>
 #include <SoftwareSerial.h>
 #include <math.h>
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+// U8x8 writes text directly and does not allocate Adafruit's 1024-byte
+// framebuffer, which was failing on the Uno's limited SRAM.
+U8X8_SSD1306_128X64_NONAME_HW_I2C display(U8X8_PIN_NONE);
 bool displayReady = false;
 
 #define LDR_PIN A0
@@ -82,6 +81,7 @@ unsigned long lastPiezoUpdateTime = 0;
 unsigned long lastLedTransitionTime = 0;
 unsigned long lastPiezoDisplayPeakTime = 0;
 float piezoDisplayPeakVoltage = 0.0f;
+float lastPiezoTapVoltage = 0.0f;
 bool previousLedOutput = false;
 bool ledOutputInitialized = false;
 float piezoEventPeakVoltage = 0.0;
@@ -174,22 +174,17 @@ void setup() {
   const uint8_t oledAddress = findOledAddress();
   if (oledAddress == 0) {
     Serial.println(F("No I2C device found at 0x3C or 0x3D; continuing without OLED."));
-  } else if (!display.begin(SSD1306_SWITCHCAPVCC, oledAddress)) {
-    Serial.print(F("I2C device found at 0x"));
-    Serial.print(oledAddress, HEX);
-    Serial.println(F(" but SSD1306 initialization failed; continuing without OLED."));
   } else {
+    display.setI2CAddress(oledAddress << 1); // U8x8 takes the 8-bit I2C address
+    display.begin();
+    display.setPowerSave(0);
+    display.setFont(u8x8_font_chroma48medium8_r);
     displayReady = true;
-    Serial.print(F("OLED detected at I2C address 0x"));
+    Serial.print(F("OLED text driver started at I2C address 0x"));
     Serial.println(oledAddress, HEX);
     display.clearDisplay();
-    display.setTextColor(WHITE);
-    display.setTextSize(1);
-    display.setCursor(10, 10);
-    display.println(F("PROTOTYPE BOOTING..."));
-    display.setCursor(10, 25);
-    display.println(F("LED Output: D8"));
-    display.display();
+    display.drawString(0, 1, "PIEZO GRID START");
+    display.drawString(0, 3, "LED OUTPUT: D8");
   }
 
   // Let the analog input settle and use its resting level as the initial
@@ -439,6 +434,7 @@ void loop() {
       piezoQuietSince = 0;
       piezoEventPeakVoltage = measuredPulseVoltage;
       filteredPulseVoltage = piezoEventPeakVoltage;
+      lastPiezoTapVoltage = measuredPulseVoltage;
       // Count once when the positive impact is confirmed. A bridge rectifier
       // and storage capacitor can hold A1 high after the impact, so waiting
       // for the signal to return to baseline would lose real events.
@@ -452,6 +448,7 @@ void loop() {
       }
       if (measuredPulseVoltage > piezoEventPeakVoltage) {
         piezoEventPeakVoltage = measuredPulseVoltage;
+        lastPiezoTapVoltage = measuredPulseVoltage;
       }
       if (deviationAdc <= PIEZO_RELEASE_ADC) {
         if (piezoQuietSince == 0) piezoQuietSince = now;
@@ -511,40 +508,26 @@ void loop() {
 
   if (displayReady && now - lastDisplayTime >= DISPLAY_REFRESH_MS) {
     lastDisplayTime = now;
+    char row[17];
+    char number[9];
     display.clearDisplay();
-
-    display.setCursor(0, 0);
-    display.print(F("STATUS: "));
-    display.println(isNight ? F("NIGHT") : F("DAY"));
-    display.drawLine(0, 10, SCREEN_WIDTH - 1, 10, SSD1306_WHITE);
-
-    display.setCursor(0, 13);
-    display.print(F("Steps: "));
-    display.println(stepCount);
-
-    display.setCursor(0, 25);
-    display.print(F("Harvested: "));
-    // Show the peak A1 piezo pulse; hold briefly so the OLED refresh cannot
-    // miss a short impact. This is the same piezo-voltage view as before.
-    display.print(piezoDisplayPeakVoltage, 2);
-    display.println(F(" V"));
-
-    display.setCursor(0, 37);
-    display.print(F("Motion: "));
-    display.println(motionDetected == HIGH ? F("YES") : F("NO"));
-
-    display.setCursor(0, 49);
-    display.print(F("Streetlight: "));
-    display.println(shouldTurnOn ? F("ON") : F("OFF"));
-
-    display.display();
+    display.drawString(0, 0, isNight ? "STATUS: NIGHT" : "STATUS: DAY");
+    display.drawString(0, 1, "----------------");
+    snprintf(row, sizeof(row), "Steps: %u", (unsigned int)stepCount);
+    display.drawString(0, 2, row);
+    display.drawString(0, 3, "Harvested:");
+    dtostrf(piezoDisplayPeakVoltage, 4, 2, number);
+    snprintf(row, sizeof(row), "%s V", number);
+    display.drawString(0, 4, row);
+    display.drawString(0, 5, motionDetected == HIGH ? "Motion: YES" : "Motion: NO");
+    display.drawString(0, 6, shouldTurnOn ? "Streetlight: ON" : "Streetlight: OFF");
   }
 
   if (now - lastSerialTime >= USB_TELEMETRY_MS) {
     lastSerialTime = now;
 
     // USB diagnostics remain at a low cadence; cloud telemetry is sent below.
-    sendTelemetryJson(Serial, stepCount, storageCapVoltage, currentVoltage,
+    sendTelemetryJson(Serial, stepCount, storageCapVoltage, lastPiezoTapVoltage,
                       ambientLuxPct, isNight, shouldTurnOn);
     // Keep a raw A1 diagnostic on USB only so the bridge output and threshold
     // can be checked without changing the NodeMCU telemetry JSON schema.
@@ -581,7 +564,7 @@ void loop() {
     lastGatewayTelemetryTime = now;
     lastGatewayStepCount = stepCount;
     sendGatewayTelemetryJson(gatewaySerial, stepCount, storageCapVoltage,
-                             currentVoltage, ambientLuxPct);
+                             lastPiezoTapVoltage, ambientLuxPct);
   }
 }
 
