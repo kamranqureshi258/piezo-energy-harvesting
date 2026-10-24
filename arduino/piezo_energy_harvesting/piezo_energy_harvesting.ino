@@ -6,6 +6,7 @@
     - OLED Display: 128x64 SSD1306 (I2C address auto-detected at 0x3C or 0x3D; SDA=A4, SCL=A5)
     - LDR Sensor: Analog Pin A0
     - Piezo Sensor: Analog Pin A1
+    - Post-bridge 1000 uF storage capacitor DC sense: Analog Pin A2
     - PIR Motion Sensor: Digital Pin 2
     - Streetlight Relay / LED: Digital Pin 8
     - Day/Night toggle button: Digital Pin 4 to GND (INPUT_PULLUP)
@@ -43,6 +44,7 @@ bool displayReady = false;
 
 #define LDR_PIN A0
 #define PIEZO_PIN A1
+#define STORAGE_CAP_PIN A2
 #define PIR_PIN 2
 #define STREETLIGHT_PIN 8
 #define DAYNIGHT_BTN_PIN 4
@@ -56,7 +58,10 @@ bool displayReady = false;
 SoftwareSerial gatewaySerial(GATEWAY_RX_PIN, GATEWAY_TX_PIN);  // (10, 11): RX first
 
 int stepCount = 0;
-float totalVoltage = 0.0;
+// A2 measures post-bridge storage voltage. A1 displays the piezo input pulse.
+// Keep A2 <= 5 V; set the divider ratio if a voltage divider is fitted.
+const float STORAGE_DIVIDER_RATIO = 1.0f;
+float storageCapVoltage = 0.0f;
 float filteredPulseVoltage = 0.0;
 float piezoBaselineAdc = 0.0;
 float peakObservedDeltaAdc = 0.0;
@@ -69,10 +74,16 @@ unsigned long piezoQuietSince = 0;
 unsigned long lastSerialTime = 0;
 unsigned long lastDisplayTime = 0;
 unsigned long lastGatewayTelemetryTime = 0;
+long lastGatewayStepCount = -1;
 unsigned long lastStepTime = 0;
 unsigned long piezoStartupTime = 0;
 unsigned long piezoEventStartedAt = 0;
 unsigned long lastPiezoUpdateTime = 0;
+unsigned long lastLedTransitionTime = 0;
+unsigned long lastPiezoDisplayPeakTime = 0;
+float piezoDisplayPeakVoltage = 0.0f;
+bool previousLedOutput = false;
+bool ledOutputInitialized = false;
 float piezoEventPeakVoltage = 0.0;
 // A piezo disc and an Arduino analog input pick up electrical/mechanical
 // noise. Count one event only after a clear excursion from the resting
@@ -89,11 +100,15 @@ const unsigned long PIEZO_MAX_EVENT_MS = 800;
 const float PIEZO_PULSE_DECAY_V_PER_SEC = 3.0;
 const unsigned long DISPLAY_REFRESH_MS = 500;
 const unsigned long USB_TELEMETRY_MS = 5000;
-// The ESP gateway polls cloud commands independently; a 5 s Uno snapshot keeps
-// telemetry fresh while reducing serial coupling into the high-impedance A1.
-const unsigned long GATEWAY_TELEMETRY_MS = 5000;
-// Give the rectifier input time to settle after a D11 transmission burst.
-const unsigned long GATEWAY_PIEZO_QUIET_MS = 250;
+// Keep the web counter responsive while retaining a short A1 quiet window
+// around each compact D11 telemetry frame.
+const unsigned long GATEWAY_TELEMETRY_MS = 1000;
+const unsigned long GATEWAY_PIEZO_QUIET_MS = 100;
+// An LED load can couple a switching/ground transient into the high-impedance
+// A1 piezo input. Let the output settle and relearn its baseline before
+// accepting another piezo event.
+const unsigned long LED_PIEZO_QUIET_MS = 120;
+const unsigned long PIEZO_DISPLAY_HOLD_MS = 1500;
 
 enum LightMode { LIGHT_AUTO, LIGHT_FORCE_ON, LIGHT_FORCE_OFF };
 enum DayMode { DAY_AUTO, DAY_FORCE_DAY, DAY_FORCE_NIGHT };
@@ -121,6 +136,28 @@ uint8_t findOledAddress() {
     }
   }
   return 0;
+}
+
+int readStorageCapAdcMedian() {
+  // Discard the first conversion after switching the AVR ADC to A2, then use
+  // a median to reject isolated switching/ground-coupled ADC spikes.
+  analogRead(STORAGE_CAP_PIN);
+  delayMicroseconds(50);
+  int samples[5];
+  for (uint8_t i = 0; i < 5; i++) {
+    samples[i] = analogRead(STORAGE_CAP_PIN);
+    delayMicroseconds(50);
+  }
+  for (uint8_t i = 1; i < 5; i++) {
+    int value = samples[i];
+    int j = i - 1;
+    while (j >= 0 && samples[j] > value) {
+      samples[j + 1] = samples[j];
+      j--;
+    }
+    samples[j + 1] = value;
+  }
+  return samples[2];
 }
 
 void setup() {
@@ -274,6 +311,11 @@ void loop() {
     shouldTurnOn = false;
   }
   digitalWrite(STREETLIGHT_PIN, shouldTurnOn ? HIGH : LOW);
+  if (!ledOutputInitialized || shouldTurnOn != previousLedOutput) {
+    previousLedOutput = shouldTurnOn;
+    ledOutputInitialized = true;
+    lastLedTransitionTime = millis();
+  }
 
   // Truthful confirmation for the gateway: sent only after the LED state was
   // actually applied (same protocol as arduino/led_serial_test).
@@ -344,6 +386,8 @@ void loop() {
   bool calibratingPiezo = now - piezoStartupTime < PIEZO_STARTUP_CALIBRATION_MS;
   bool gatewayTransmitWindow = lastGatewayTelemetryTime != 0 &&
       now - lastGatewayTelemetryTime < GATEWAY_PIEZO_QUIET_MS;
+  bool ledSwitchWindow = lastLedTransitionTime != 0 &&
+      now - lastLedTransitionTime < LED_PIEZO_QUIET_MS;
 
   if (calibratingPiezo) {
     // Ignore boot/settling transients and quickly learn the sensor's resting
@@ -353,9 +397,17 @@ void loop() {
     piezoTriggerSamples = 0;
     filteredPulseVoltage = 0.0;
     piezoQuietSince = 0;
-  } else if (gatewayTransmitWindow) {
+  } else if (gatewayTransmitWindow || ledSwitchWindow) {
     // Ignore analog samples during the SoftwareSerial telemetry burst: the
     // Uno's own D11 transmission can couple into A1 and resemble a piezo hit.
+    // Also track the new resting level while an LED load is settling, so its
+    // switching transient cannot be mistaken for harvested piezo voltage.
+    if (ledSwitchWindow && !gatewayTransmitWindow) {
+      piezoBaselineAdc = rawPiezo;
+      piezoEventActive = false;
+      piezoArmed = true;
+      piezoQuietSince = 0;
+    }
     filteredPulseVoltage -= PIEZO_PULSE_DECAY_V_PER_SEC * deltaSeconds;
     if (filteredPulseVoltage < 0.0) filteredPulseVoltage = 0.0;
     piezoTriggerSamples = 0;
@@ -391,7 +443,6 @@ void loop() {
       // and storage capacitor can hold A1 high after the impact, so waiting
       // for the signal to return to baseline would lose real events.
       stepCount++;
-      totalVoltage += piezoEventPeakVoltage * 2.0f;
       lastStepTime = now;
     }
 
@@ -436,6 +487,27 @@ void loop() {
   }
 
   float currentVoltage = filteredPulseVoltage < 0.05 ? 0.0 : filteredPulseVoltage;
+  if (currentVoltage > piezoDisplayPeakVoltage) {
+    piezoDisplayPeakVoltage = currentVoltage;
+    lastPiezoDisplayPeakTime = now;
+  } else if (piezoDisplayPeakVoltage > 0.0f &&
+             now - lastPiezoDisplayPeakTime >= PIEZO_DISPLAY_HOLD_MS) {
+    piezoDisplayPeakVoltage = 0.0f;
+  }
+
+  // Keep the post-bridge capacitor voltage available for cloud telemetry.
+  // Hold its last stable value during LED switching to avoid reporting a
+  // momentary ground/ADC transient as harvested energy.
+  if (!ledSwitchWindow) {
+    int capAdc = readStorageCapAdcMedian();
+    storageCapVoltage = capAdc * (5.0f / 1023.0f) * STORAGE_DIVIDER_RATIO;
+  }
+
+  int ambientLuxPct = map(ldrValue, 0, 1023, 100, 0);
+  if (dayMode == DAY_FORCE_NIGHT) ambientLuxPct = 8;
+  if (dayMode == DAY_FORCE_DAY) ambientLuxPct = 92;
+  if (ambientLuxPct < 0) ambientLuxPct = 0;
+  if (ambientLuxPct > 100) ambientLuxPct = 100;
 
   if (displayReady && now - lastDisplayTime >= DISPLAY_REFRESH_MS) {
     lastDisplayTime = now;
@@ -452,7 +524,9 @@ void loop() {
 
     display.setCursor(0, 25);
     display.print(F("Harvested: "));
-    display.print(totalVoltage, 2);
+    // Show the peak A1 piezo pulse; hold briefly so the OLED refresh cannot
+    // miss a short impact. This is the same piezo-voltage view as before.
+    display.print(piezoDisplayPeakVoltage, 2);
     display.println(F(" V"));
 
     display.setCursor(0, 37);
@@ -469,15 +543,8 @@ void loop() {
   if (now - lastSerialTime >= USB_TELEMETRY_MS) {
     lastSerialTime = now;
 
-    int ambientLuxPct = map(ldrValue, 0, 1023, 100, 0);
-    if (dayMode == DAY_FORCE_NIGHT) ambientLuxPct = 8;
-    if (dayMode == DAY_FORCE_DAY) ambientLuxPct = 92;
-    if (ambientLuxPct < 0) ambientLuxPct = 0;
-    if (ambientLuxPct > 100) ambientLuxPct = 100;
-
-    // Both UARTs send at the same 5-second cadence to reduce coupling into A1;
-    // A1 sampling is suppressed briefly after the paired transmission burst.
-    sendTelemetryJson(Serial, stepCount, totalVoltage, currentVoltage,
+    // USB diagnostics remain at a low cadence; cloud telemetry is sent below.
+    sendTelemetryJson(Serial, stepCount, storageCapVoltage, currentVoltage,
                       ambientLuxPct, isNight, shouldTurnOn);
     // Keep a raw A1 diagnostic on USB only so the bridge output and threshold
     // can be checked without changing the NodeMCU telemetry JSON schema.
@@ -506,11 +573,15 @@ void loop() {
       peakPositiveExcursionAdc = 0.0;
       peakNegativeExcursionAdc = 0.0;
     }
-    if (now - lastGatewayTelemetryTime >= GATEWAY_TELEMETRY_MS) {
-      lastGatewayTelemetryTime = now;
-      sendGatewayTelemetryJson(gatewaySerial, stepCount, totalVoltage,
-                               currentVoltage, ambientLuxPct);
-    }
+  }
+
+  // Send a changed step total immediately, plus regular one-second snapshots.
+  if (stepCount != lastGatewayStepCount ||
+      now - lastGatewayTelemetryTime >= GATEWAY_TELEMETRY_MS) {
+    lastGatewayTelemetryTime = now;
+    lastGatewayStepCount = stepCount;
+    sendGatewayTelemetryJson(gatewaySerial, stepCount, storageCapVoltage,
+                             currentVoltage, ambientLuxPct);
   }
 }
 
