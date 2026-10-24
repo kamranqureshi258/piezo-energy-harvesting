@@ -29,7 +29,7 @@ const int STEP_TRIGGER_THRESHOLD = 35;
 const int STEP_RELEASE_THRESHOLD = 20;
 const unsigned long DEBOUNCE_MS = 700;
 const unsigned long SEND_INTERVAL = 200;
-const unsigned long GATEWAY_SEND_INTERVAL = 1000;
+const unsigned long GATEWAY_SEND_INTERVAL = 5000;
 const unsigned long OLED_REFRESH_MS = 200;
 
 unsigned long steps = 0;
@@ -290,8 +290,8 @@ void loop() {
     sendDashboardData(Serial);   // USB diagnostics; web app reads backend only
   }
 
-  // Push a new step count immediately; send regular snapshots once per second
-  // so the other readings stay fresh without excessive serial traffic.
+  // Push a new step count immediately. Periodic 5-second snapshots keep the
+  // SoftwareSerial receive queue from filling while the NodeMCU does HTTPS.
   bool stepsChanged = steps != lastGatewayStepsSent;
   if (stepsChanged || now - lastGatewaySendTime >= GATEWAY_SEND_INTERVAL) {
     lastGatewaySendTime = now;

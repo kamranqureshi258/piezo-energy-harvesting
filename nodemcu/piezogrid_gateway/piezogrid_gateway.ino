@@ -76,7 +76,7 @@ static_assert(sizeof(GATEWAY_TOKEN) > 8, "GATEWAY_TOKEN looks unset - paste the 
 #define LOG_BAUD            9600     // UART1 (GPIO2) debug log, optional monitor
 
 SoftwareSerial unoSerial(UNO_RX_PIN, UNO_TX_PIN); // (RX, TX) = GPIO13, GPIO12
-#define SYNC_INTERVAL_MS    1000UL   // ~1 sync/second when healthy
+#define SYNC_INTERVAL_MS    5000UL   // keep HTTPS/TLS resource use bounded
 #define RETRY_INTERVAL_MS   10000UL  // extra wait after a failed sync (cold starts)
 #define WIFI_RETRY_MS       10000UL  // Wi-Fi reconnect retry cadence
 #define STALE_LIMIT_MS      12000UL  // Uno sends its low-noise snapshot every 5 s
@@ -85,8 +85,8 @@ SoftwareSerial unoSerial(UNO_RX_PIN, UNO_TX_PIN); // (RX, TX) = GPIO13, GPIO12
 #define POST_TIMEOUT_MS     15000    // HTTP timeout, bounds Render cold-start waits
 #define LINE_MAX_LEN        200      // sanity cap for one Uno line
 #define MAX_ACTIVITY_SUM    1000000.0f // vcap is cumulative ΣΔV, not capacitor volts
-#define TLS_MFLN_BUFFER     4096     // conservative RX limit for current Render response/cert chain
-#define TLS_TX_BUFFER       512
+#define TLS_RX_BUFFER       4096     // backend TLS chain/replies fit; shared client avoids churn
+#define TLS_TX_BUFFER       512      // BearSSL can fragment outgoing records into this buffer
 
 // Backend endpoint (not a secret). Only change for a LOCAL test server.
 static const char SYNC_URL[] =
@@ -155,6 +155,8 @@ static const char *wifiStatusName(int s) {
 // ---------------------------------------------------------------------------
 BearSSL::X509List trustAnchors;   // parsed once in setup()
 BearSSL::Session  tlsSession;     // TLS session reuse (fast re-handshakes)
+WiFiClientSecure   gatewayClient; // keep BearSSL's shared stack/client alive across syncs
+HTTPClient         gatewayHttp;
 
 int           lastWifiStatus = -1;    // last Wi-Fi status seen (transition logs)
 bool          clockWasSane = false;   // last NTP/clock state seen (transition logs)
@@ -347,44 +349,29 @@ static size_t buildSyncBody(char *buf, size_t bufLen, bool includeTelemetry) {
   return len;
 }
 
-// One authenticated HTTPS sync. Bounded by POST_TIMEOUT_MS; Render cold starts
-// surface as HTTP -1/502 and are retried. Returns true on HTTP 200.
+// One authenticated HTTPS sync. The backend does not negotiate MFLN. Use an
+// 4 KB receive buffer for its TLS chain/replies, and reuse one client so
+// BearSSL's shared stack is allocated once instead of churning the heap.
+// Outgoing records can safely use 512 bytes.
+// Bounded by POST_TIMEOUT_MS; cold starts are retried. Returns true on HTTP 200.
 static bool postSync(const char *payload) {
-  // The ESP8266 has limited heap for BearSSL's default ~16 KB RX buffer.
-  // Probe Render once; if MFLN is unavailable, retain a 4 KB RX buffer sized
-  // for the current ~2.5 KB DER certificate chain and small API responses.
-  // TLS certificate/time validation remains enabled for the actual sync.
-  static bool mflnChecked = false;
-  static bool mflnSupported = false;
-  if (!mflnChecked) {
-    mflnSupported = WiFiClientSecure::probeMaxFragmentLength(
-        "piezogrid-cloud-backend.onrender.com", 443, TLS_MFLN_BUFFER);
-    mflnChecked = true;
-    gwLog("[GW] TLS MFLN 4KB %s\n", mflnSupported ? "supported" : "not supported");
-  }
-  if (!mflnSupported) {
-    gwLog("[GW] backend has no MFLN; using bounded 4KB RX for its current small replies");
-  }
+  gatewayClient.setBufferSizes(TLS_RX_BUFFER, TLS_TX_BUFFER);
+  gatewayClient.setTrustAnchors(&trustAnchors); // chain validation (time-aware)
+  gatewayClient.setSession(&tlsSession);        // TLS session reuse
 
-  WiFiClientSecure client;
-  client.setBufferSizes(TLS_MFLN_BUFFER, TLS_TX_BUFFER);
-  client.setTrustAnchors(&trustAnchors);   // chain validation (time-aware)
-  client.setSession(&tlsSession);          // TLS session reuse: fast re-handshakes
-
-  HTTPClient http;
-  http.setTimeout(POST_TIMEOUT_MS);
-  if (!http.begin(client, SYNC_URL)) {
+  gatewayHttp.setTimeout(POST_TIMEOUT_MS);
+  if (!gatewayHttp.begin(gatewayClient, SYNC_URL)) {
     gwLog("[GW] HTTP begin failed (heap %u)\n", ESP.getFreeHeap());
     return false;
   }
-  http.addHeader("Content-Type", "application/json");
-  http.addHeader("x-gateway-token", GATEWAY_TOKEN); // secret header, never logged
-  int code = http.POST(payload);
+  gatewayHttp.addHeader("Content-Type", "application/json");
+  gatewayHttp.addHeader("x-gateway-token", GATEWAY_TOKEN); // secret header, never logged
+  int code = gatewayHttp.POST(payload);
   if (code == 200) {
     // Body is small and bounded; read it for command/ackResult handling.
-    String body = http.getString();
-    http.end();
-    client.stop();
+    String body = gatewayHttp.getString();
+    gatewayHttp.end();
+    gatewayClient.stop();
     handleSyncResponse(body);
     return true;
   }
@@ -395,17 +382,18 @@ static bool postSync(const char *payload) {
     gwLog("[GW] Fix: GATEWAY_TOKEN in nodemcu/secrets.h must EXACTLY match the Render environment variable (no quotes, spaces, or line breaks), then re-flash");
   } else if (code < 0) {
     char tlsError[160] = {0};
-    int tlsCode = client.getLastSSLError(tlsError, sizeof(tlsError));
+    int tlsCode = gatewayClient.getLastSSLError(tlsError, sizeof(tlsError));
     String httpError = HTTPClient::errorToString(code);
-    gwLog("[GW] sync transport error %d (%s); TLS %d: %.100s", code,
-          httpError.c_str(), tlsCode, tlsError);
+    gwLog("[GW] sync transport error %d (%s); TLS %d: %.80s; heap=%u maxBlock=%u", code,
+          httpError.c_str(), tlsCode, tlsError, ESP.getFreeHeap(),
+          ESP.getMaxFreeBlockSize());
   } else {
-    String errorBody = http.getString();
+    String errorBody = gatewayHttp.getString();
     gwLog("[GW] sync HTTP %d (cold start / TLS?), response: %.100s", code,
           errorBody.c_str());
   }
-  http.end();
-  client.stop();
+  gatewayHttp.end();
+  gatewayClient.stop();
   return false;
 }
 
