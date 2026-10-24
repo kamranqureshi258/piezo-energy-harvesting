@@ -3,8 +3,8 @@ import { Footprints, ArrowRight, Zap, BatteryCharging, Cpu, Lightbulb, Sparkles 
 
 export default function EnergyFlowDiagram({
   steps = 0,
+  pulse = 0,
   vCap = 0,
-  joules = 0,
   brightness = 0,
   pwmValue = 0,
 }) {
@@ -54,9 +54,9 @@ export default function EnergyFlowDiagram({
             2. Diode Rectifier
           </span>
           <span className="text-xs font-mono font-extrabold text-amber-300">
-            {joules} Joules
+            {pulse.toFixed(2)} V
           </span>
-          <span className="text-[10px] text-slate-400">AC to DC Conversion</span>
+          <span className="text-[10px] text-slate-400">Piezo input A1</span>
         </div>
 
         {/* Connection Arrow 2 */}
@@ -74,7 +74,7 @@ export default function EnergyFlowDiagram({
           <span className="text-xs font-mono font-extrabold text-emerald-300">
             {vCap.toFixed(2)} V DC
           </span>
-          <span className="text-[10px] text-slate-400">4700µF Reservoir</span>
+          <span className="text-[10px] text-slate-400">1000µF Reservoir</span>
         </div>
 
         {/* Connection Arrow 3 */}

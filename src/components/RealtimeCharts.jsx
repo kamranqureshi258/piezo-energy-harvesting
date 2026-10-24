@@ -60,7 +60,7 @@ export default function RealtimeCharts({ history = [] }) {
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Energy Harvested (J)
+            Model Energy (J)
           </button>
         </div>
       </div>
@@ -92,8 +92,8 @@ export default function RealtimeCharts({ history = [] }) {
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '12px' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Area type="monotone" dataKey="vCap" name="Piezo Activity ΣΔV (V)" stroke="#f59e0b" fillOpacity={1} fill="url(#vCapGrad)" strokeWidth={2} />
-                <Area type="monotone" dataKey="pulse" name="Pulse Voltage (V)" stroke="#06b6d4" fillOpacity={1} fill="url(#pulseGrad)" strokeWidth={1.5} />
+                <Area type="monotone" dataKey="vCap" name="Storage Capacitor A2 (V DC)" stroke="#f59e0b" fillOpacity={1} fill="url(#vCapGrad)" strokeWidth={2} />
+                <Area type="monotone" dataKey="pulse" name="Piezo Input A1 (V)" stroke="#06b6d4" fillOpacity={1} fill="url(#pulseGrad)" strokeWidth={1.5} />
               </AreaChart>
             ) : activeTab === 'brightness' ? (
               <LineChart data={history} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -122,7 +122,7 @@ export default function RealtimeCharts({ history = [] }) {
                   contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.75rem', fontSize: '12px' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '12px' }} />
-                <Area type="monotone" dataKey="joules" name="Energy Harvested (Joules)" stroke="#3b82f6" fillOpacity={1} fill="url(#jouleGrad)" strokeWidth={2} />
+                <Area type="monotone" dataKey="joules" name="Estimated energy from steps (J)" stroke="#3b82f6" fillOpacity={1} fill="url(#jouleGrad)" strokeWidth={2} />
               </AreaChart>
             )}
           </ResponsiveContainer>

@@ -116,7 +116,7 @@ export function calculateLightAdjustment({
  */
 export function calculateEnergyMetrics({
   vCap = 0,
-  capacitanceFarads = 0.0047, // 4700 uF standard capacitor
+  capacitanceFarads = 0.001, // 1000 uF storage capacitor used by this build
   footsteps = 0,
   avgVoltagePerStep = 2.5,
 }) {

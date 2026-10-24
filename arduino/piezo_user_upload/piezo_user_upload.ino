@@ -25,8 +25,8 @@ const int DARK_THRESHOLD = 600;
 // The idle telemetry hovered near the old 100-count edge and generated
 // repeated false steps. Use hysteresis so one noisy crossing cannot retrigger
 // until the rectified input has fallen back near its resting level.
-const int STEP_TRIGGER_THRESHOLD = 130;
-const int STEP_RELEASE_THRESHOLD = 85;
+const int STEP_TRIGGER_THRESHOLD = 35;
+const int STEP_RELEASE_THRESHOLD = 20;
 const unsigned long DEBOUNCE_MS = 700;
 const unsigned long SEND_INTERVAL = 200;
 const unsigned long GATEWAY_SEND_INTERVAL = 1000;

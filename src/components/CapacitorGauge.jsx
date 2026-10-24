@@ -19,17 +19,17 @@ export default function CapacitorGauge({
 
   // Status color logic
   let colorGradient = 'from-rose-600 via-amber-500 to-rose-500';
-  let statusBadge = { text: 'MINIMAL ACTIVITY', bg: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
+  let statusBadge = { text: 'LOW CHARGE', bg: 'bg-rose-500/20 text-rose-300 border-rose-500/30' };
 
   if (socPct >= 80) {
     colorGradient = 'from-emerald-500 via-teal-400 to-cyan-400';
-    statusBadge = { text: 'HIGH ACTIVITY', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
+    statusBadge = { text: 'HIGH CHARGE', bg: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' };
   } else if (socPct >= 40) {
     colorGradient = 'from-amber-500 via-yellow-400 to-emerald-400';
-    statusBadge = { text: 'MODERATE ACTIVITY', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
+    statusBadge = { text: 'MID CHARGE', bg: 'bg-amber-500/20 text-amber-300 border-amber-500/30' };
   } else if (socPct >= 20) {
     colorGradient = 'from-amber-600 via-orange-500 to-amber-500';
-    statusBadge = { text: 'LOW ACTIVITY', bg: 'bg-orange-500/20 text-orange-300 border-orange-500/30' };
+    statusBadge = { text: 'LOW CHARGE', bg: 'bg-orange-500/20 text-orange-300 border-orange-500/30' };
   }
 
   return (
@@ -41,8 +41,8 @@ export default function CapacitorGauge({
             <Activity className="w-5 h-5 animate-pulse" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-100">Piezo Activity Accumulator</h2>
-            <p className="text-xs text-slate-400">Cumulative A1 signal deltas (Σ ΔV) — activity proxy, not stored energy</p>
+            <h2 className="text-base font-bold text-slate-100">Storage Capacitor</h2>
+            <p className="text-xs text-slate-400">Measured post-bridge DC voltage from A2</p>
           </div>
         </div>
         <span className={`px-2.5 py-1 text-xs font-extrabold rounded-full border ${statusBadge.bg}`}>
@@ -84,7 +84,7 @@ export default function CapacitorGauge({
 
           {/* Rated Voltage indicator */}
           <p className="mt-3 text-xs font-medium text-slate-400">
-            Scale: <span className="text-amber-400 font-semibold">0–{maxCapVoltage.toFixed(1)} V (Σ ΔV)</span>
+            Scale: <span className="text-amber-400 font-semibold">0–{maxCapVoltage.toFixed(1)} V (A2)</span>
           </p>
         </div>
 

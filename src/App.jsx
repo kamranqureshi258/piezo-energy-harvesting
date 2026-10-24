@@ -40,6 +40,11 @@ function loadStepHistory() {
   }
 }
 
+function localDayKey(value) {
+  const date = new Date(value);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 // Validate a backend telemetry payload. Malformed or non-numeric payloads are
 // dropped instead of being displayed as cloud data.
 function isValidCloudTelemetry(t) {
@@ -265,6 +270,11 @@ export default function App() {
     sendLedCommand(turnOn ? 'LIGHT:ON' : 'LIGHT:OFF');
   };
 
+  const localTodayKey = localDayKey(new Date());
+  const todayStepCount = stepEvents
+    .filter((event) => localDayKey(event.observedAt) === localTodayKey)
+    .reduce((sum, event) => sum + event.stepsAdded, 0);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-amber-500 selection:text-slate-950">
       {/* Top Navbar */}
@@ -312,7 +322,7 @@ export default function App() {
             className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${activePage === 'steps' ? 'border-cyan-500/50 bg-cyan-950/60 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'}`}
           >
             <CalendarDays className="h-4 w-4" />
-            Step History
+            Daily Steps
           </button>
         </div>
 
@@ -320,6 +330,27 @@ export default function App() {
           <StepHistory events={stepEvents} currentSteps={steps} />
         ) : (
           <>
+
+            <div className="flex flex-col gap-4 rounded-2xl border border-cyan-500/20 bg-gradient-to-r from-cyan-950/40 to-slate-900/80 p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-4">
+                <div className="rounded-xl bg-cyan-500/10 p-3 text-cyan-300">
+                  <CalendarDays className="h-6 w-6" />
+                </div>
+                <div>
+                  <h2 className="font-bold text-white">Today’s step activity</h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    {todayStepCount.toLocaleString()} steps logged today · open the timeline for times and the LED energy estimate.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePage('steps')}
+                className="shrink-0 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2.5 text-sm font-bold text-cyan-200 transition-colors hover:bg-cyan-500/20"
+              >
+                Open daily history
+              </button>
+            </div>
 
             {/* Primary 3D Footpath & Streetlamp Viewport with Direct Light Adjustment Controls */}
             <InteractiveRoomScene
@@ -362,23 +393,23 @@ export default function App() {
                 badgeText="model: +0.15 J/event"
               />
               <MetricCard
-                title="Harvested Energy (model est.)"
-                value={energyMetrics.totalHarvestedJoules}
-                unit="Joules"
-                subtitle="Estimate · assumes +0.15 J per detected event"
-                icon={Zap}
+                title="Piezo Input Voltage (A1)"
+                value={pulse.toFixed(2)}
+                unit="V"
+                subtitle="Live piezo pulse sampled after the bridge rectifier"
+                icon={Activity}
                 colorScheme="amber"
-                badgeText={`${energyMetrics.co2SavedGrams}g CO₂ est.`}
+                badgeText="A1 reading"
                 pulse={true}
               />
               <MetricCard
-                title="Piezo Activity (Σ ΔV)"
+                title="Storage Capacitor Voltage (A2)"
                 value={vCap.toFixed(2)}
-                unit="V cum."
-                subtitle={`Cumulative A1 signal deltas · level ${lightState.capState}% of 5 V scale`}
-                icon={Activity}
+                unit="V"
+                subtitle={`Post-bridge DC voltage · level ${lightState.capState}% of 5 V scale`}
+                icon={Zap}
                 colorScheme="cyan"
-                badgeText="activity proxy"
+                badgeText="1000 µF"
               />
               <MetricCard
                 title="Adaptive LED Brightness"
@@ -394,8 +425,8 @@ export default function App() {
             {/* Energy Flow Conversion Pipeline */}
             <EnergyFlowDiagram
               steps={steps}
+              pulse={pulse}
               vCap={vCap}
-              joules={energyMetrics.totalHarvestedJoules}
               brightness={lightState.brightness}
               pwmValue={lightState.pwmValue}
             />

@@ -45,6 +45,10 @@ export default function StepHistory({ events = [], currentSteps = 0 }) {
   }, {});
   const days = Object.keys(groups).sort((a, b) => b.localeCompare(a));
   const recordedSteps = events.reduce((sum, event) => sum + event.stepsAdded, 0);
+  const todayKey = localDayKey(new Date());
+  const todaySteps = (groups[todayKey] || []).reduce((sum, event) => sum + event.stepsAdded, 0);
+  const todayLedSeconds = todaySteps * ASSUMED_JOULES_PER_STEP / ASSUMED_LED_POWER_WATTS;
+  const ledHourProgress = Math.min(100, (todaySteps / STEPS_FOR_ONE_LED_HOUR) * 100);
 
   return (
     <section className="space-y-6" aria-labelledby="step-history-title">
@@ -75,6 +79,29 @@ export default function StepHistory({ events = [], currentSteps = 0 }) {
           </div>
         </div>
       </div>
+
+      <section className="rounded-2xl border border-slate-800 bg-slate-900/80 p-5" aria-label="Today's steps and LED estimate">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Today</div>
+            <div className="mt-1 text-3xl font-black text-white">{todaySteps.toLocaleString()} <span className="text-base font-semibold text-slate-400">steps</span></div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs font-bold uppercase tracking-wider text-slate-400">Hypothetical LED runtime</div>
+            <div className="mt-1 text-xl font-black text-emerald-300">{formatRuntime(todayLedSeconds)}</div>
+          </div>
+        </div>
+        <div className="mt-5 flex items-center justify-between gap-3 text-xs font-semibold text-slate-400">
+          <span>Progress toward 1 hour at 0.5 W</span>
+          <span>{todaySteps.toLocaleString()} / {STEPS_FOR_ONE_LED_HOUR.toLocaleString()} steps</span>
+        </div>
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800" role="progressbar" aria-label="Today's steps toward one hypothetical LED-hour" aria-valuenow={Math.round(ledHourProgress)} aria-valuemin={0} aria-valuemax={100}>
+          <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-emerald-400 transition-[width] duration-500" style={{ width: `${ledHourProgress}%` }} />
+        </div>
+        <p className="mt-3 text-xs text-slate-500">
+          Each step is modeled as 0.15 J. Real runtime will be lower because of piezo, rectifier, storage, and converter losses.
+        </p>
+      </section>
 
       {days.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-700 bg-slate-900/60 px-6 py-14 text-center">
