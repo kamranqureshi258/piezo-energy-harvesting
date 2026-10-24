@@ -9,18 +9,36 @@ import EnergyFlowDiagram from './components/EnergyFlowDiagram';
 import PresetModes from './components/PresetModes';
 import Oscilloscope from './components/Oscilloscope';
 import TelemetryStatusBar from './components/TelemetryStatusBar';
+import StepHistory from './components/StepHistory';
 
 import { calculateLightAdjustment, calculateEnergyMetrics } from './utils/lightAlgorithm';
 import { soundSynth } from './utils/audioSynth';
 import { aiVoice } from './utils/voiceSynth';
 import { cloudSync } from './utils/cloudSync';
 
-import { Footprints, Zap, Activity, Lightbulb, Sparkles } from 'lucide-react';
+import { Footprints, Zap, Activity, Lightbulb, Sparkles, LayoutDashboard, CalendarDays } from 'lucide-react';
 
 // Freshness window for cloud telemetry: the gateway publishes ~1 update per
 // second, so more than 10s without a new backend payload means the stream is
 // no longer live.
 const CLOUD_STALE_MS = 10000;
+const STEP_HISTORY_STORAGE_KEY = 'piezo-grid-step-history-v1';
+const MAX_STEP_HISTORY_EVENTS = 2000;
+
+function loadStepHistory() {
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(STEP_HISTORY_STORAGE_KEY) || '[]');
+    if (!Array.isArray(saved)) return [];
+    return saved.filter((event) =>
+      event && typeof event.id === 'string' &&
+      typeof event.observedAt === 'string' && Number.isFinite(Date.parse(event.observedAt)) &&
+      Number.isInteger(event.stepsAdded) && event.stepsAdded > 0 &&
+      Number.isFinite(event.totalSteps) && event.totalSteps >= 0
+    ).slice(0, MAX_STEP_HISTORY_EVENTS);
+  } catch {
+    return [];
+  }
+}
 
 // Validate a backend telemetry payload. Malformed or non-numeric payloads are
 // dropped instead of being displayed as cloud data.
@@ -64,6 +82,9 @@ export default function App() {
 
   // Historical Stream for Charts
   const [history, setHistory] = useState([]);
+  const [stepEvents, setStepEvents] = useState(loadStepHistory);
+  const [activePage, setActivePage] = useState('dashboard');
+  const lastRecordedStepsRef = useRef(null);
 
   // Handlers Refs
   const handleToggleMute = () => {
@@ -109,7 +130,23 @@ export default function App() {
       setCloudUpdateCount((c) => c + 1);
 
       // The authenticated NodeMCU gateway is the sole telemetry source.
-      setSteps(Number(payload.steps));
+      const incomingSteps = Number(payload.steps);
+      const previousSteps = lastRecordedStepsRef.current;
+      if (previousSteps !== null && incomingSteps > previousSteps) {
+        const observedAt = new Date().toISOString();
+        setStepEvents((previous) => [
+          {
+            id: `${observedAt}-${previousSteps}-${incomingSteps}`,
+            observedAt,
+            stepsAdded: incomingSteps - previousSteps,
+            totalSteps: incomingSteps,
+          },
+          ...previous,
+        ].slice(0, MAX_STEP_HISTORY_EVENTS));
+      }
+      // A lower value means the device counter was reset; use it as a new baseline.
+      lastRecordedStepsRef.current = incomingSteps;
+      setSteps(incomingSteps);
       setVCap(Number(payload.vCap));
       setPulse(Number(payload.pulse));
       setAmbientLux(Number(payload.lux));
@@ -123,6 +160,14 @@ export default function App() {
       if (unsubscribeTelemetry) unsubscribeTelemetry();
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(STEP_HISTORY_STORAGE_KEY, JSON.stringify(stepEvents));
+    } catch {
+      // Keep the live history usable if browser storage is unavailable or full.
+    }
+  }, [stepEvents]);
 
   // 1 Hz ticker so the age/staleness of the last cloud payload is live.
   useEffect(() => {
@@ -248,6 +293,34 @@ export default function App() {
           </div>
         </div>
 
+        <div className="flex gap-2 border-b border-slate-800/80 pb-4" role="tablist" aria-label="Dashboard views">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activePage === 'dashboard'}
+            onClick={() => setActivePage('dashboard')}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${activePage === 'dashboard' ? 'border-cyan-500/50 bg-cyan-950/60 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'}`}
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            Dashboard
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activePage === 'steps'}
+            onClick={() => setActivePage('steps')}
+            className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition-colors ${activePage === 'steps' ? 'border-cyan-500/50 bg-cyan-950/60 text-cyan-200' : 'border-slate-800 bg-slate-900/60 text-slate-400 hover:border-slate-700 hover:text-slate-200'}`}
+          >
+            <CalendarDays className="h-4 w-4" />
+            Step History
+          </button>
+        </div>
+
+        {activePage === 'steps' ? (
+          <StepHistory events={stepEvents} currentSteps={steps} />
+        ) : (
+          <>
+
             {/* Primary 3D Footpath & Streetlamp Viewport with Direct Light Adjustment Controls */}
             <InteractiveRoomScene
               brightness={lightState.brightness}
@@ -358,6 +431,8 @@ export default function App() {
 
             {/* Realtime Streaming Charts */}
             <RealtimeCharts history={history} />
+          </>
+        )}
       </main>
 
     </div>
