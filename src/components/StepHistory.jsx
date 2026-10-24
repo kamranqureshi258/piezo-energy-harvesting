@@ -14,6 +14,23 @@ const timeFormatter = new Intl.DateTimeFormat(undefined, {
   second: '2-digit',
 });
 
+// Hypothetical model only; actual output depends on the piezo, rectifier,
+// storage, converter, and LED losses.
+const ASSUMED_JOULES_PER_STEP = 0.15;
+const ASSUMED_LED_POWER_WATTS = 0.5;
+const STEPS_FOR_ONE_LED_HOUR = Math.ceil(
+  (ASSUMED_LED_POWER_WATTS * 60 * 60) / ASSUMED_JOULES_PER_STEP
+);
+
+function formatRuntime(seconds) {
+  if (seconds < 60) return `${Math.round(seconds)} sec`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`;
+}
+
 function localDayKey(value) {
   const date = new Date(value);
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
@@ -41,6 +58,11 @@ export default function StepHistory({ events = [], currentSteps = 0 }) {
           <p className="mt-2 max-w-2xl text-sm text-slate-400">
             Each entry is recorded when live telemetry reports a higher step total. The device sends a cumulative counter, so a batched increase shares one observed time.
           </p>
+          <div className="mt-4 rounded-xl border border-amber-500/20 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
+            <strong className="font-bold text-amber-200">Hypothetical LED estimate:</strong>{' '}
+            assuming {ASSUMED_JOULES_PER_STEP.toFixed(2)} J harvested per step and a {ASSUMED_LED_POWER_WATTS.toFixed(1)} W LED,
+            {' '}{STEPS_FOR_ONE_LED_HOUR.toLocaleString()} steps equal about one hour of LED power before conversion and storage losses.
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:min-w-64">
           <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4">
@@ -68,6 +90,7 @@ export default function StepHistory({ events = [], currentSteps = 0 }) {
             const dayEvents = groups[day].slice().sort((a, b) => b.observedAt.localeCompare(a.observedAt));
             const daySteps = dayEvents.reduce((sum, event) => sum + event.stepsAdded, 0);
             const date = new Date(dayEvents[0].observedAt);
+            const estimatedLedSeconds = daySteps * ASSUMED_JOULES_PER_STEP / ASSUMED_LED_POWER_WATTS;
             return (
               <section key={day} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80">
                 <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 px-5 py-4">
@@ -79,6 +102,11 @@ export default function StepHistory({ events = [], currentSteps = 0 }) {
                     {daySteps.toLocaleString()} steps recorded
                   </span>
                 </header>
+                <div className="border-b border-slate-800 px-5 py-3 text-sm text-slate-400">
+                  At the model assumptions above, this is enough energy for about{' '}
+                  <span className="font-bold text-emerald-300">{formatRuntime(estimatedLedSeconds)}</span>{' '}
+                  of a 0.5 W LED ({Math.ceil((ASSUMED_LED_POWER_WATTS * 60 * 60) / ASSUMED_JOULES_PER_STEP).toLocaleString()} steps for one hour).
+                </div>
                 <div className="divide-y divide-slate-800/80">
                   {dayEvents.map((event) => (
                     <div key={event.id} className="grid grid-cols-[1fr_auto] items-center gap-4 px-5 py-4 sm:grid-cols-[1fr_auto_auto]">

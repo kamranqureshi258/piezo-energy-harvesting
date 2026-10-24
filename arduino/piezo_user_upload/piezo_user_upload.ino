@@ -12,8 +12,14 @@ SoftwareSerial espSerial(10, 11); // RX, TX; Uno D11 TX -> NodeMCU D7 via divide
 
 const int LDR_PIN = A0;
 const int PIEZO_PIN = A1;
+const int STORAGE_CAP_PIN = A2;
 const int PIR_PIN = 2;
 const int LED_PIN = 8;
+
+// A2 measures the post-bridge 1000 uF storage capacitor DC voltage.
+// Keep A2 at or below 5 V. If the capacitor can exceed 5 V, use a divider
+// and set STORAGE_DIVIDER_RATIO to the inverse divider scale.
+const float STORAGE_DIVIDER_RATIO = 1.0f;
 
 const int DARK_THRESHOLD = 600;
 // The idle telemetry hovered near the old 100-count edge and generated
@@ -23,14 +29,15 @@ const int STEP_TRIGGER_THRESHOLD = 130;
 const int STEP_RELEASE_THRESHOLD = 85;
 const unsigned long DEBOUNCE_MS = 700;
 const unsigned long SEND_INTERVAL = 200;
-const unsigned long GATEWAY_SEND_INTERVAL = 5000;
+const unsigned long GATEWAY_SEND_INTERVAL = 1000;
 const unsigned long OLED_REFRESH_MS = 200;
 
 unsigned long steps = 0;
-float totalVoltage = 0.0f;
+float storageCapVoltage = 0.0f;
 unsigned long lastStepTime = 0;
 unsigned long lastSendTime = 0;
 unsigned long lastGatewaySendTime = 0;
+unsigned long lastGatewayStepsSent = 0;
 
 bool motion = false;
 bool isDark = false;
@@ -59,6 +66,13 @@ void readSensors() {
   // A1 must receive a properly protected 0-5 V signal.
   piezoValue = analogRead(PIEZO_PIN);
   piezoVolts = piezoValue * (5.0 / 1023.0);
+
+  // Keep the post-bridge storage voltage for cloud telemetry. Discard one ADC
+  // conversion after switching A1→A2.
+  analogRead(STORAGE_CAP_PIN);
+  delayMicroseconds(50);
+  int capacitorAdc = analogRead(STORAGE_CAP_PIN);
+  storageCapVoltage = capacitorAdc * (5.0f / 1023.0f) * STORAGE_DIVIDER_RATIO;
 }
 
 void countFootsteps() {
@@ -71,7 +85,6 @@ void countFootsteps() {
   if (piezoArmed && piezoValue >= STEP_TRIGGER_THRESHOLD &&
       now - lastStepTime >= DEBOUNCE_MS) {
     steps++;
-    totalVoltage += piezoVolts * 2.0f;
     lastStepTime = now;
     piezoArmed = false;
   }
@@ -101,9 +114,9 @@ void updateOLED() {
   static bool initialized = false;
   static int shownNight = -1;
   static unsigned long shownSteps = 0;
-  static int shownHarvestedTenth = -1;
+  static int shownPiezoHundredthsV = -1;
   static int shownMotion = -1;
-  static int shownLight = -1;
+  static int shownLightStatus = -1;
   bool changed = false;
 
   display.setTextSize(1);
@@ -129,13 +142,13 @@ void updateOLED() {
     changed = true;
   }
 
-  int harvestedTenth = (int)(totalVoltage * 10.0f + 0.5f);
-  if (!initialized || shownHarvestedTenth != harvestedTenth) {
+  int piezoHundredthsV = (int)(piezoVolts * 100.0f + 0.5f);
+  if (!initialized || shownPiezoHundredthsV != piezoHundredthsV) {
     display.fillRect(60, 20, 68, 8, SSD1306_BLACK);
     display.setCursor(60, 20);
-    display.print(harvestedTenth / 10.0f, 1);
+    display.print(piezoHundredthsV / 100.0f, 2);
     display.print(F(" V"));
-    shownHarvestedTenth = harvestedTenth;
+    shownPiezoHundredthsV = piezoHundredthsV;
     changed = true;
   }
 
@@ -148,12 +161,20 @@ void updateOLED() {
     changed = true;
   }
 
-  int lightValue = lightOn ? 1 : 0;
-  if (!initialized || shownLight != lightValue) {
-    display.fillRect(72, 40, 56, 8, SSD1306_BLACK);
-    display.setCursor(72, 40);
-    display.print(lightOn ? F("ON") : F("OFF"));
-    shownLight = lightValue;
+  int lightStatus = lightMode == FORCE_ON ? 2 : lightMode == FORCE_OFF ? 3 : (lightOn ? 1 : 0);
+  if (!initialized || shownLightStatus != lightStatus) {
+    display.fillRect(0, 40, 128, 8, SSD1306_BLACK);
+    display.setCursor(0, 40);
+    display.print(F("LED: "));
+    if (lightMode == FORCE_ON) {
+      display.print(F("WEB ON"));
+    } else if (lightMode == FORCE_OFF) {
+      display.print(F("WEB OFF"));
+    } else {
+      display.print(F("AUTO "));
+      display.print(lightOn ? F("ON") : F("OFF"));
+    }
+    shownLightStatus = lightStatus;
     changed = true;
   }
 
@@ -162,12 +183,12 @@ void updateOLED() {
 }
 
 void sendDashboardData(Stream &out) {
-  // vcap carries the cumulative piezo activity (A1 voltage x10 per tap),
-  // not a direct capacitor measurement. Pulse and lux remain range-safe.
+  // vcap is the post-bridge storage-capacitor voltage; pulse is the piezo A1
+  // input voltage. They are distinct physical measurements.
   out.print(F("{\"steps\":"));
   out.print(steps);
   out.print(F(",\"vcap\":"));
-  out.print(totalVoltage, 1);
+  out.print(storageCapVoltage, 2);
   out.print(F(",\"pulse\":"));
   out.print(piezoVolts, 2);
   out.print(F(",\"lux\":"));
@@ -242,7 +263,7 @@ void setup() {
   display.setCursor(0, 30);
   display.print(F("Motion: "));
   display.setCursor(0, 40);
-  display.print(F("Streetlight: "));
+  display.print(F("LED: "));
   display.display();
 }
 
@@ -269,10 +290,12 @@ void loop() {
     sendDashboardData(Serial);   // USB diagnostics; web app reads backend only
   }
 
-  // Keep the Uno-to-NodeMCU receive buffer clear while its HTTPS call blocks.
-  // The gateway marks readings fresh for 12 s, so 5 s snapshots are safe.
-  if (now - lastGatewaySendTime >= GATEWAY_SEND_INTERVAL) {
+  // Push a new step count immediately; send regular snapshots once per second
+  // so the other readings stay fresh without excessive serial traffic.
+  bool stepsChanged = steps != lastGatewayStepsSent;
+  if (stepsChanged || now - lastGatewaySendTime >= GATEWAY_SEND_INTERVAL) {
     lastGatewaySendTime = now;
+    lastGatewayStepsSent = steps;
     sendDashboardData(espSerial);
   }
 }
