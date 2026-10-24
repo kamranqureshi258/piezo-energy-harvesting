@@ -39,8 +39,14 @@ class CloudSyncManager {
     try {
       this.socket = io(this.serverUrl, {
         reconnection: true,
-        reconnectionAttempts: 20,
+        // Keep retrying through Render cold starts, Wi-Fi/router outages, and
+        // temporary backend restarts; a finite attempt cap leaves this page
+        // permanently disconnected until the user reloads it.
+        reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
+        reconnectionDelayMax: 10000,
+        randomizationFactor: 0.5,
+        timeout: 20000,
       });
 
       this.socket.on('connect', () => {

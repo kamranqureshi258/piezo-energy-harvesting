@@ -35,7 +35,7 @@ const GATEWAY_TOKEN = process.env.GATEWAY_TOKEN || '';
 // The ESP8266 may be finishing a bounded 15 s HTTPS sync when a browser
 // queues a command. Keep the command alive long enough for that sync to end,
 // the next poll to deliver it, and the following poll to return its ack.
-const LED_COMMAND_TIMEOUT_MS = Number(process.env.LED_COMMAND_TIMEOUT_MS || 30000);
+const LED_COMMAND_TIMEOUT_MS = Number(process.env.LED_COMMAND_TIMEOUT_MS || 60000);
 const CONTROL_RATE_LIMIT_MS = Number(process.env.CONTROL_RATE_LIMIT_MS || 400);
 
 const DEFAULT_ORIGINS = [

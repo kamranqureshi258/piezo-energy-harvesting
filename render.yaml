@@ -16,4 +16,4 @@ services:
         sync: false
       # How long the server waits for a gateway acknowledgment (ms).
       - key: LED_COMMAND_TIMEOUT_MS
-        value: 10000
+        value: 60000
